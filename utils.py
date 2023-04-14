@@ -3,25 +3,38 @@ import pandas as pd
 import config
 
 
-def get_initial_doc(topic, subtopics):
+def get_initial_doc(description, subtopics):
+    """
+    creates the initial documents for the information retrieval competition.
+    :param description: str, the information need
+    :param subtopics: list of str, the subtopics of the information need
+    :return:
+    """
+    max_tokens = config.max_tokens
     response = False
-    prompt_ = fr"Please write a short document of no more than 150 words on the topic of {topic}. " \
-              f"Your document should cover the following subtopics: {subtopics[0]}," \
-              f"{subtopics[1]}, {subtopics[2]} Your writing should be informative and engaging, and should provide " \
-              f"the reader with a clear understanding of the topic and its related subtopics."
+    prompt_ = f"Given a scenario depicting the information need, write a short text that the person described in the " \
+              f"scenario would like to read. " \
+              f"The text should cover the following subtopics: '{subtopics[0]}'," \
+              f"'{subtopics[1]}', '{subtopics[2]}'\n\nScenario: {description}\n\nGenerated text:"
 
     while not response:
         try:
             response = openai.Completion.create(
                 model=config.model,
-                prompt=config.prompt_,
+                prompt=prompt_,
                 temperature=config.temperature,
                 top_p=config.top_p,
-                max_tokens=config.max_tokens,
+                max_tokens=max_tokens,
                 frequency_penalty=config.frequency_penalty,
                 presence_penalty=config.presence_penalty,
             )
             # print("success")
+            word_no = len(response.choices[0].text.split())
+            if word_no > 150:
+                max_tokens -= 50
+                response = False
+                print(f"word no: {word_no}, max tokens: {max_tokens}")
+                continue
             break
         except Exception as e:
             print(e)
@@ -61,5 +74,10 @@ def data_set_creation():
         lambda x: pd.Series(str(x).split("-")[1:]))
     merge_df = merge_df.merge(query_df, on="query_id")[
         ['DOCNO', 'round_number', 'query_id', 'author_id', 'query', 'TEXT', 'QREL', 'KSREL', 'POS']]
-
     return merge_df
+
+
+def gen_fine_tune_prompt(feature_text, query):
+    fine_tune_prompt = f"Given the query '{query}', please write a superior feature text that better describes it " \
+                       f"than the following inferior feature text: '{feature_text}'.\n\nGenerated text: "
+    return fine_tune_prompt
