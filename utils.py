@@ -81,3 +81,12 @@ def gen_fine_tune_prompt(feature_text, query):
     fine_tune_prompt = f"Given the query '{query}', please write a superior feature text that better describes it " \
                        f"than the following inferior feature text: '{feature_text}'.\n\nGenerated text: "
     return fine_tune_prompt
+
+
+def get_id_text_pairs(id_, epoch="last"):
+    if epoch == 'last': epoch = max(list(config.comp_data.round_number))
+    df = config.comp_data[(config.comp_data.query_id == id_) & (config.comp_data.round_number == epoch)][
+        ["author_id", "TEXT"]]
+    pairs = df.values.tolist()
+    pair_dict = {p[0]: p[1] for p in pairs}
+    return pair_dict

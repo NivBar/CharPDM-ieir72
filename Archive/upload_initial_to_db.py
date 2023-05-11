@@ -2,7 +2,7 @@ import json
 
 from pymongo import MongoClient
 
-inital_data = json.load(open("topic_queries_doc.json", "r", encoding="utf8"))
+inital_data = json.load(open("../topic_queries_doc.json", "r", encoding="utf8"))
 client = MongoClient('asr2.iem.technion.ac.il', 27017)
 db = client.asr16
 

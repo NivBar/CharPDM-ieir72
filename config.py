@@ -1,11 +1,24 @@
 import json
 
 import openai
+import pandas as pd
+from API_key import API_key
 
-data_exist = {"comp": True, "improvements": False, "tops": False}
+
+#### bot names ####
+def get_names_dict(markov=False):
+    if markov:
+        return {"all": "MABOT", "tops": "MTBOT", "self": "MSBOT"}
+    else:
+        return {"all": "NMABOT", "tops": "NMTBOT", "self": "NMSBOT"}
+
+
+#### visualization parameters ####
+data_exist = {"comp": True, "improvements": True, "tops": True}
 display_graphs = False
 
-openai.api_key = "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"
+#### openai parameters ####
+openai.api_key = API_key
 
 """
 Model: Determines the architecture and parameters of the language model used for text generation. Different models have 
@@ -32,14 +45,23 @@ text. High presence_penalty values (e.g., 2.0 or higher) can promote the generat
 values (e.g., 0.5 or lower) can produce more repetitive and redundant outputs.
 """
 model = "gpt-3.5-turbo"
-temperature = 1.0
-top_p = 0.9
+# temperature = 1.0
+# top_p = 0.9
+# max_tokens = 700
+# frequency_penalty = 1.0
+# presence_penalty = 2.0
+temperature = 0.5
+top_p = 0.8
 max_tokens = 700
 frequency_penalty = 1.0
 presence_penalty = 2.0
 
-topic_codex = json.load(open("topic_queries_doc.json", "r"))
-x = 1
+#### useful data collections ####
+# topic_codex_new = json.load(open("topic_queries_doc.json", "r"))
+topic_codex = dict()
 
+# TODO: change to actual copetition data when starting
+comp_data = pd.read_csv("Archive/comp_dataset.csv")
 
+query_index = {x[0]: x[1] for x in comp_data[["query_id", "query"]].drop_duplicates().values.tolist()}
 

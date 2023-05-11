@@ -4,7 +4,7 @@ from tqdm import tqdm
 
 import utils
 
-with open('title_best_variations.pkl', 'rb') as handle:
+with open('Archive/title_best_variations.pkl', 'rb') as handle:
     topic_dict = pickle.load(handle)
 
 output = dict()
