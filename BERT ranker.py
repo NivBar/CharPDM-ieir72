@@ -1,15 +1,20 @@
+import re
+import json
+import numpy as np
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-import torch
 from tqdm import tqdm
 import os
 import glob
 import pandas as pd
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import matplotlib.pyplot as plt
-import random
+# import torch.nn as nn
+# import torch.optim as optim
+# import matplotlib.pyplot as plt
+# import random
 from competition_chatgpt import get_comp_text
+# import nltk
+# nltk.download('stopwords')
+from nltk.corpus import stopwords
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -21,9 +26,10 @@ model_name = "amberoad/bert-multilingual-passage-reranking-msmarco"
 tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 model = AutoModelForSequenceClassification.from_pretrained(model_name).to(device).eval()
 
+
 def get_bert_scores(queries_to_docnos, docs_dict, queries_dict):
     scores_dict = {}
-    for qid in tqdm(queries_to_docnos, desc="BERT", total=len(queries_to_docnos)):
+    for qid in queries_to_docnos:
         for docno in queries_to_docnos[qid]:
             query_text = queries_dict[qid]
             doc_text = docs_dict[docno]
@@ -47,114 +53,137 @@ def get_bert_scores(queries_to_docnos, docs_dict, queries_dict):
 
     return scores_dict
 
-def create_data_structures(df):
-    queries_dict = dict(zip(df.query_id, df.query1))
-    docs_dict = dict(zip(df.docno, df.current_document))
-    queries_to_docnos = {k: list(set(df[df.query_id == k].docno)) for k in set(df.query_id)}
+
+def create_data_structures(df, queries_list, test=True):
+    df = df[df.query_string.isin(queries_list)]
+    queries_dict = dict(zip(df.query_id, df.query_string))
+    if test:
+        docs_dict = dict()
+        queries_to_docnos = {k: ["TEST"] for k in set(df.query_id)}
+    else:
+        docs_dict = dict(zip(df.docno, df.current_document))
+        queries_to_docnos = {k: list(set(df[df.query_id == k].docno)) for k in set(df.query_id)}
     return queries_dict, docs_dict, queries_to_docnos
 
-all_files = glob.glob(os.path.join("./data_snapshots/", "*.csv"))
-df = pd.concat((pd.read_csv(f) for f in all_files), ignore_index=True)
 
-# queries_dict, docs_dict, queries_to_docnos = create_data_structures(df[df.round_no == 5].drop_duplicates(subset=['current_document']))
-# scores = get_bert_scores(queries_to_docnos, docs_dict, queries_dict)
+def get_unique_words(string):
+    cleaned_string = re.sub(r'[^\w\s]', '', string.lower())
+    words = cleaned_string.split()
+    unique_words = set(words)
+    stop_words = set(stopwords.words('english'))
+    unique_words = unique_words - stop_words
+    return unique_words
 
-# Define the neural network architecture
-class Net(nn.Module):
-    def __init__(self):
-        super(Net, self).__init__()
-        self.fc1 = nn.Linear(4, 32)
-        self.fc2 = nn.Linear(32, 16)
-        self.fc3 = nn.Linear(16, 1)
 
-    def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = self.fc3(x)
-        return x
+def get_messages(query):
+    # version 7
+    messages = [
+       {"role": "system",
+        "content": fr"You participate in a search engine optimization competition regarding the following topic\s: {query}"},
+       {"role": "user",
+        "content": f"Generate a single text that a ranker will deem as highly relevant to {query}, incorporate the words {get_unique_words(query)} and avoid stop words in your text as much as possible."
+                   " The text should be comprehensive, informative and coherent. Avoid meta commentary.\nText:"}]
+    return messages
 
-# Generate a batch of queries
-queries = list(set(df.query1))
 
-# Define the initial weights
-initial_weights = torch.tensor([0.5, 0.5, 0.5, 0.5], dtype=torch.float32)
+def generate_text(query, weights):
+    return get_comp_text(messages=get_messages(query), temperature=round(float(weights[0]), 2),
+                         top_p=round(float(weights[1]), 2),
+                         frequency_penalty=round(float(weights[2]), 2), presence_penalty=round(float(weights[3]), 2))
 
-# Function to generate text using the weights
-def generate_text(weights):
-    # Implement your logic to generate text using the given weights
-    # pass
-    get_comp_text
-    return "test text"
 
-# Function to calculate similarity score between a query and generated text
-def calculate_similarity(query, text):
-    # Implement your logic to calculate similarity score
-    pass
+def calculate_similarity(query, queries_to_docnos, docs_dict, queries_dict, idx):
+    queries_to_docnos_ = {idx: queries_to_docnos[idx]}
+    return get_bert_scores(queries_to_docnos_, docs_dict, queries_dict)
 
-# Create the neural network model
-model = Net()
 
-# Use an optimizer to minimize the negative average score
-optimizer = optim.Adam(model.parameters())
+# def plot_histogram(values, save_path):
+#     plt.hist(values, bins='auto', color='darkgrey', alpha=0.7, rwidth=0.85)
+#     plt.axvline(np.mean(values), color='magenta', linestyle='solid', linewidth=2,
+#                 label=f'Mean --> {round(np.mean(values), 3)}')
+#     plt.axvline(np.median(values), color='cyan', linestyle='dashed', linewidth=2,
+#                 label=f'Median --> {round(np.median(values), 3)}')
+#     plt.xlabel('Values')
+#     plt.ylabel('Frequency')
+#     plt.title('Histogram of Values')
+#     plt.legend()
+#     plt.savefig(f"fine_tuning_files/{save_path}.jpeg", format='jpeg')
+#     plt.show()
 
-# Random train-test split
-random.seed(42)
-random.shuffle(queries)
-train_queries = queries[:20]
-val_queries = queries[20:]
 
-# Lists to store losses
-train_losses = []
-val_losses = []
+def save_dictionary(dictionary, save_path):
+    with open(f"fine_tuning_files/{save_path}.txt", 'w', encoding='utf-8') as file:
+        json.dump(dictionary, file, ensure_ascii=False)
 
-# Training loop
-num_epochs = 100
-for epoch in range(num_epochs):
-    optimizer.zero_grad()
 
-    # Generate texts using the initial weights for train queries
-    train_texts = [generate_text(initial_weights) for _ in range(len(train_queries))]
+def get_next_version(file_name):
+    pattern = rf'{file_name}(\d+)'
+    version_numbers = [int(re.search(pattern, f).group(1)) for f in os.listdir("./fine_tuning_files") if
+                       re.search(pattern, f)]
+    max_version = max(version_numbers) if version_numbers else 0
+    return max_version + 1
 
-    # Calculate similarity scores for train queries
-    train_scores = [calculate_similarity(q, t) for q, t in zip(train_queries, train_texts)]
 
-    # Calculate negative average score as the train loss
-    train_loss = -torch.mean(torch.tensor(train_scores))
-    train_losses.append(train_loss.item())
+def get_queries_string(df):
+    for idx, row in df.iterrows():
+        df.loc[idx, "query_string"] = ", ".join([row.query1, row.query2, row.query3])
+    return df
 
-    # Generate texts using the initial weights for validation queries
-    val_texts = [generate_text(initial_weights) for _ in range(len(val_queries))]
 
-    # Calculate similarity scores for validation queries
-    val_scores = [calculate_similarity(q, t) for q, t in zip(val_queries, val_texts)]
+# scoring experiments
+if __name__ == '__main__':
+    # fixed weights
+    weights = [0.2, 0.3, 1.0, 0.0]
 
-    # Calculate negative average score as the validation loss
-    val_loss = -torch.mean(torch.tensor(val_scores))
-    val_losses.append(val_loss.item())
 
-    # Backpropagation and weight update for train loss
-    train_loss.backward()
-    optimizer.step()
+    all_files = glob.glob(os.path.join("./data_snapshots/", "*.csv"))
+    # check if a temp file exists
+    if os.path.exists("./fine_tuning_files/temp_df.csv"):
+        df = pd.read_csv("./fine_tuning_files/temp_df.csv")
+    else:
+        df = pd.concat((pd.read_csv(f) for f in all_files), ignore_index=True)
+        df = get_queries_string(df)
+        df["gen_text"] = np.nan
+    queries_list = list(set(df.query_string))
+    queries_dict, docs_dict, queries_to_docnos = create_data_structures(
+        df[df.round_no == 1].drop_duplicates(subset=['current_document']), queries_list=queries_list)
+    idx_dict = {v: k for k, v in queries_dict.items()}
+    messages = get_messages(queries_list[0])
 
-    # Update the initial weights for validation loss
-    with torch.no_grad():
-        initial_weights -= optimizer.param_groups[0]['lr'] * initial_weights.grad
-        initial_weights.grad.zero_()
+    scores_dict = dict()
+    scores_dict["messages"] = messages
+    scores_dict["weights"] = weights
+    scores_dict["data"] = dict()
+    # scores_list = []
+    for query in tqdm(queries_list):
 
-    # Print progress
-    if (epoch + 1) % 10 == 0:
-        print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss.item()}, Val Loss: {val_loss.item()}")
+        # # do not create new text for queries that already have a text
+        # if df[df.query_string == query].gen_text.notna().sum() != 0:
+        #   continue
 
-# Get the optimized weights
-optimized_weights = initial_weights
+        text = generate_text(query, weights)
+        # text = "test doc"
+        docs_dict["TEST"] = text
+        idx = idx_dict[query]
+        query_list = [q.strip() for q in query.split(",")]
+        temp_queries_dict = queries_dict.copy()
+        temp_score_list = []
+        for q in query_list:
+            temp_queries_dict[idx] = q
+            score = calculate_similarity(q, queries_to_docnos, docs_dict, temp_queries_dict, idx)
+            temp_score_list.append(score["TEST"])
 
-# Plotting the losses
-epochs = range(1, num_epochs + 1)
-plt.plot(epochs, train_losses, label='Train Loss')
-plt.plot(epochs, val_losses, label='Validation Loss')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.legend()
-plt.show()
+        # score = calculate_similarity(query, queries_to_docnos, docs_dict, queries_dict)
+        scores_dict["data"][idx] = {"score1": temp_score_list[0], "score2": temp_score_list[1],
+                                    "score3": temp_score_list[2], "text": text, "query1": query_list[0],
+                                    "query2": query_list[1], "query3": query_list[2]}
 
-print("Optimized Weights:", optimized_weights)
+        # scores_list.append(temp_score_list)
+        df["gen_text"][df.query_string == query] = text
+        df.to_csv("./fine_tuning_files/temp_df.csv", index=False)
+
+    version = get_next_version('version_')
+    save_path = f'version_{version}'
+    # plot_histogram(scores_list, save_path)
+    save_dictionary(scores_dict, save_path)
+    x = 1
