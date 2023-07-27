@@ -1,9 +1,10 @@
-import json
+# import json
 
 import openai
 import pandas as pd
 from API_key import API_key
 
+current_prompt = 3
 
 #### bot names ####
 def get_names_dict(markov=False):
@@ -44,13 +45,8 @@ Presence_penalty: Encourages the model to avoid repeating words or phrases that 
 text. High presence_penalty values (e.g., 2.0 or higher) can promote the generation of novel and varied text, while low 
 values (e.g., 0.5 or lower) can produce more repetitive and redundant outputs.
 """
-model = "gpt-3.5-turbo"
-# temperature = 0.1
-# top_p = 0.3
-# max_tokens = 250
-# frequency_penalty = 2.0
-# presence_penalty = 0.0
-
+# model = "gpt-3.5-turbo"
+model = "gpt-4"
 temperature = 0.2
 top_p = 0.3
 max_tokens = 250
