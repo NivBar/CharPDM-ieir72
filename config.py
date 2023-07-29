@@ -4,7 +4,7 @@ import openai
 import pandas as pd
 from API_key import API_key
 
-current_prompt = 3
+current_prompt = 5
 
 #### bot names ####
 def get_names_dict(markov=False):

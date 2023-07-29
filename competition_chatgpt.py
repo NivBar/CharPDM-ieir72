@@ -139,7 +139,7 @@ def get_unique_words(string):
     return str(unique_words).replace("{", "").replace("}", "").replace("'", "")
 
 
-def get_messages(bot_name, data):
+def get_messages(bot_name, creator_name, data):
     assert bot_name in ["NMABOT", "NMTBOT", "NMSBOT", "MABOT", "MTBOT", "MSBOT"]
     assert data is not None
 
@@ -151,55 +151,36 @@ def get_messages(bot_name, data):
                 "NMSBOT": {"bot_type": "self", "markov": False}}
 
     bot_type, markov = bot_data[bot_name]["bot_type"], bot_data[bot_name]["markov"]
-    # queries = data.iloc[0][["query1", "query2", "query3"]].values.tolist()
     queries = [data.iloc[0]['query']]
     epoch = int(max(data["round_no"]))
+    previous_doc = data[(data.round_no == epoch) & (data.username == creator_name)]["current_document"].values[0]
+    previous_rank = data[(data.round_no == epoch) & (data.username == creator_name)]["position"].values[0]
+
     if markov:
         data = data[data["round_no"] == epoch]
-    # else:
-    #     data = data[data["round_no"].isin([epoch, epoch - 1])]
 
     query_string = ', '.join(queries)
 
     base_messages = [
         {"role": "system",
-         "content": fr"You participate in a search engine optimization competition regarding the following topic: {query_string}"}]
+         "content": fr"You participate in a search engine optimization competition regarding the following topic: {query_string}"},
+        {"role": "system",
+         "content": fr"Your current document, ranked {previous_rank} in round {epoch} is: {previous_doc}"}]
 
     messages = base_messages.copy()
-
-    # messages = [
-    #     {"role": "system",
-    #      "content": fr"You participate in a search engine optimization competition regarding the following queries: " +
-    #                 ", ".join(queries) +
-    #                 ". Your document should be ranked first for all queries."},
-    #     {"role": "user",
-    #      "content": "Generate a single text that a user will deem as highly relevant to all three queries."
-    #                 " The text should be comprehensive, informative and coherent. Avoid meta commentary.\nText:"},
-    # ]
 
     rounds = data['round_no'].unique()
     for r in rounds:
         round_data = data[data["round_no"] == r]
         top_user = get_top_user(round_data, r)
-        # top_user = "BOT"
-        # top_ranks = round_data[round_data.username == top_user].iloc[0][
-        #     ["position1", "position2", "position3"]].values.tolist()
-        # curr_text = round_data[round_data.username == bot_name].iloc[0]["posted_document"]
-        # curr_ranks = round_data[round_data.username == bot_name].iloc[0][
-        #     ["position1", "position2", "position3"]].values.tolist()
-
-        top_text = round_data[round_data.username == top_user].iloc[0]["TEXT"]
+        top_text = round_data[round_data.username == top_user].iloc[0]["current_document"]
         print(f"Top text's length in round {r}: {len(top_text.split(' '))}")
-
-        # messages.append({"role": "assistant", "content": f"{curr_text}"})
-        # messages.append({"role": "system",
-        #                  "content": f"You were ranked {rank_str(np.median([curr_ranks[0], curr_ranks[1], curr_ranks[2]]))} in this epoch"})
 
         if bot_type == "all":
             txt_rnk = ""
-            for _, row in round_data.iterrows():
-                if row["username"] != bot_name:
-                    txt_rnk += f"Ranked {rank_str(row['position'])}:\n{row['TEXT']}\n\n"
+            for _, row in round_data.sort_values("position", ascending=True).iterrows():
+                if row["username"] != creator_name:
+                    txt_rnk += f"Ranked {row['position']}:\n{row['current_document']}\n\n"
                     # txt_rnk += f"{row.username}:\n{row['TEXT']}\n\n"
 
             messages.append(
@@ -211,31 +192,33 @@ def get_messages(bot_name, data):
             # messages.append(base_messages[1])
 
         elif bot_type == "tops":
-            # messages.append(
-            #     {"role": "system",
-            #      "content": f"The top document, ranked {rank_str(top_ranks[0])}, "
-            #                 f"{rank_str(top_ranks[1])}, {rank_str(top_ranks[2])} "
-            #                 f"respectively: {top_text}"})
             messages.append(
                 {"role": "system",
-                 "content": f"The top text in round number {r}: {top_text}"})
-            # messages.append({"role": "system",
-            #                  "content": f"Infer from the top document how to align well with the ranker's features."})
-            # messages.append({"role": "user",
-            #                  "content": f"Generate a single text that highly resembles the top text. Text:"})
+                 "content": f"The top text in round number {r} is: {top_text}"})
+
     ### 1 ###
     # messages.append({"role": "user",
     #                  "content": f"Generate a single text emulating the top text (ranked first) in order to out rank it. Incorporate the topic's' words ({get_unique_words(query_string)}) in your text as much as possible."
     #                             " The text should be comprehensive, informative and coherent. Avoid meta commentary.\nText:"})
     ### 2 ### + ### 3 (gpt-4)###
+    # messages.append({"role": "user",
+    #                  "content": f"Generate a text that ranks higher than the top text while closely resembling it. "
+    #                             f"Include as many topic keywords ({get_unique_words(query_string)}) as possible. "
+    #                             f"Maintain coherence and avoid meta commentary.\nText:"})
+    ### 4 ###
+    # messages.append({"role": "user",
+    #                  "content": f"Edit your current document so it will be ranked first while keeping faithfulness to it. "
+    #                             f"Consider using the top document as a reference for a highly ranked text. "
+    #                             f"Include as many topic keywords ({get_unique_words(query_string)}) as possible. "
+    #                             f"Maintain coherence and avoid meta commentary.\nText:"})
+    ### 5 ###
     messages.append({"role": "user",
-                     "content": f"Generate a text that ranks higher than the top text while closely resembling it. "
-                                f"Include as many topic keywords ({get_unique_words(query_string)}) as possible. "
-                                f"Maintain coherence and avoid meta commentary.\nText:"})
-    # messages.append(base_messages[1])
-    #
-    # elif bot_type == "self":
-    #     messages.append(base_messages[1])
+                     "content": f"Your task is to enhance the SEO ranking of your given document while preserving its core message and essence. "
+                                f"To achieve this, incorporate the top-ranked (ranked 1) document's characteristics, or even parts of the text itself, into your writing. "
+                                f"Utilize the topic keywords ({get_unique_words(query_string)}) naturally within the text as much as possible. "
+                                f"Maintain coherence throughout the writing and avoid any meta commentary.\n"
+                                f"Enhanced text:"})
+
     return messages
 
 
@@ -301,34 +284,21 @@ if __name__ == '__main__':
     bot_followup = orig[orig['text'].isna()]
     # data = get_data()
     data = pd.read_csv('greg_data.csv')
-    data = data[data["round_no"] < max(data["round_no"])]
-    # data[["position1", "position2", "position3"]] = data[["position1", "position2", "position3"]].astype(int) / 10
-    # data[["position1", "position2", "position3"]] = data[["position1", "position2", "position3"]].astype(int)
-    # data[["position1", "position2", "position3"]] = 1, 1, 1
-    len_ = len(bot_followup)
+    # data = data[data["round_no"] < max(data["round_no"])]
+
+    len_ = len(orig)
     for idx, row in bot_followup.iterrows():
+        data = data[data["round_no"] < row["round_no"]]
         bot_name = row["username"]
-
-        group = row["group"]
+        creator_name = row["creator"]
         query_id = row["query_id"]
-        print(f"Starting {idx + 1}/{len_}: {bot_name}, {group}, {query_id}")
-        # rel_data = data[(data['group'] == group) & (data['query_id'] == query_id)]
+        print(
+            f"Starting {idx + 1}/{len_} ({len_ - idx} left): bot: {bot_name}, creator: {creator_name}, query:{query_id}, round: {row['round_no']}")
         rel_data = data[data['query_id'] == query_id]
-        # rel_data = rel_data.loc[
-        #     rel_data[["position1", "position2", "position3"]].median(axis=1).sort_values(axis=0).index]
-        messages = get_messages(bot_name, rel_data)
-
-        #    if not bot_valid[bot_name]:
-        #        pprint(messages)
-        #        bot_valid[bot_name] = True
-
+        messages = get_messages(bot_name, creator_name, rel_data)
         res = get_comp_text(messages)
-        # deleted_segment = min(
-        #     [x for x in [res.split(".")[-1], res.split("!")[-1], res.split("?")[-1], res.split("\n\n")[-1]] if
-        #      x != res],
-        #     key=len)
-        # res = res.replace(deleted_segment, "")
         orig.at[idx, "text"] = res
         orig.to_csv(f"bot_followup_{cp}.csv", index=False)
-        print(f"Done {idx + 1}/{len_}: {bot_name}, {group}, {query_id}")
+        print(
+            f"Done {idx + 1}/{len_}: bot: {bot_name}, creator: {creator_name}, query:{query_id}, round: {row['round_no']}")
     x = 1
