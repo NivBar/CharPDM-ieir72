@@ -1,63 +1,24 @@
-# import numpy as np
 import openai
 import config
 import tiktoken
 import pandas as pd
-import glob
 import re
-# from bson.objectid import ObjectId
 import warnings
-# from pprint import pprint
-# import nltk
-# nltk.download('stopwords')
 from nltk.corpus import stopwords
 from config import current_prompt as cp
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 warnings.filterwarnings("ignore")
 
 encoder = tiktoken.encoding_for_model(config.model)
 
+stop_words = set(stopwords.words('english'))
 
 def get_top_user(data, r):
-    # df = data[data.round_no == r][["username", "position1", "position2", "position3"]].set_index("username")
     df = data[data.round_no == r][["username", "position"]].set_index("username")
 
     return df.median(axis=1).idxmin()
-
-
-def get_data(epoch=None):
-    path = './data_snapshots'
-    if epoch is None:
-        csv_files = glob.glob(path + "/*.csv")
-        df_list = (pd.read_csv(file) for file in csv_files)
-        big_df = pd.concat(df_list, ignore_index=True)
-        return big_df
-    else:
-        return pd.read_csv(path + f"/data_snapshot_{epoch}.csv")
-
-
-def rank_suff(loc):
-    if loc == 1:
-        return ("st")
-    elif loc == 2:
-        return ("nd")
-    elif loc == 3:
-        return ("rd")
-    else:
-        return ("th")
-
-
-def rank_str(loc):
-    if loc == 1:
-        return ("first")
-    elif loc == 2:
-        return ("second")
-    elif loc == 3:
-        return ("third")
-    elif loc == 4:
-        return ("fourth")
-    elif loc == 5:
-        return ("fifth")
 
 
 def remove_sentences_second(sentences):
@@ -134,7 +95,6 @@ def get_unique_words(string):
     cleaned_string = re.sub(r'[^\w\s]', '', string.lower())
     words = cleaned_string.split()
     unique_words = set(words)
-    stop_words = set(stopwords.words('english'))
     unique_words = unique_words - stop_words
     return str(unique_words).replace("{", "").replace("}", "").replace("'", "")
 
@@ -170,11 +130,12 @@ def get_messages(bot_name, creator_name, data):
     messages = base_messages.copy()
 
     rounds = data['round_no'].unique()
+    rounds = sorted(rounds)[-3:]
     for r in rounds:
         round_data = data[data["round_no"] == r]
         top_user = get_top_user(round_data, r)
         top_text = round_data[round_data.username == top_user].iloc[0]["current_document"]
-        print(f"Top text's length in round {r}: {len(top_text.split(' '))}")
+        # print(f"Top text's length in round {r}: {len(top_text.split(' '))}")
 
         if bot_type == "all":
             txt_rnk = ""
@@ -216,7 +177,7 @@ def get_messages(bot_name, creator_name, data):
                      "content": f"Your task is to enhance the SEO ranking of your given document while preserving its core message and essence. "
                                 f"To achieve this, incorporate the top-ranked (ranked 1) document's characteristics, or even parts of the text itself, into your writing. "
                                 f"Utilize the topic keywords ({get_unique_words(query_string)}) naturally within the text as much as possible. "
-                                f"Maintain coherence throughout the writing and avoid any meta commentary.\n"
+                                f"Maintain coherence and avoid any meta commentary.\n"
                                 f"Enhanced text:"})
 
     return messages
@@ -244,25 +205,13 @@ def get_comp_text(messages, temperature=config.temperature, top_p=config.top_p,
                 frequency_penalty=frequency_penalty,
                 presence_penalty=presence_penalty,
             )
-            # print("success")
+
             word_no, res, ok_flag = count_words_complete_sentences(response['choices'][0]['message']['content'])
             if counter > 5:
                 print("LOOP BREAK - Try creating a new text manually. Truncated.")
                 res = " ".join(res.split()[:148]) + "."
                 counter = 0
                 break
-            # if (word_no > 150 and max_tokens > 200):
-            #     max_tokens -= 10
-            #     response = False
-            #     print(f"word no was: {word_no}, dropping max tokens to: {max_tokens}.")
-            #     counter += 1
-            #     continue
-            # if word_no < 140 or not ok_flag or max_tokens <= 200:
-            #     max_tokens += 10
-            #     response = False
-            #     print(f"word no was: {word_no}, increasing max tokens to: {max_tokens}.")
-            #     counter += 1
-            #     continue
             if word_no < 140 or word_no > 150:
                 max_tokens += 10
                 response = False
@@ -278,27 +227,65 @@ def get_comp_text(messages, temperature=config.temperature, top_p=config.top_p,
     return res
 
 
-if __name__ == '__main__':
-    bot_valid = {"MABOT": False, "MTBOT": False, "MSBOT": False, "NMABOT": False, "NMTBOT": False, "NMSBOT": False}
-    orig = pd.read_csv(f"bot_followup_{cp}.csv")
-    bot_followup = orig[orig['text'].isna()]
-    # data = get_data()
-    data = pd.read_csv('greg_data.csv')
-    # data = data[data["round_no"] < max(data["round_no"])]
+# if __name__ == '__main__':
+#     orig = pd.read_csv(f"bot_followup_{cp}.csv")
+#     bot_followup = orig[orig['text'].isna()]
+#     data = pd.read_csv('greg_data.csv')
+#
+#     len_ = len(orig)
+#     for idx, row in bot_followup.iterrows():
+#         data = data[data["round_no"] < row["round_no"]]
+#         bot_name = row["username"]
+#         creator_name = row["creator"]
+#         query_id = row["query_id"]
+#         print(
+#             f"Starting {idx + 1}/{len_}: bot: {bot_name}, creator: {creator_name}, query:{query_id}, round: {row['round_no']}")
+#         rel_data = data[data['query_id'] == query_id]
+#         messages = get_messages(bot_name, creator_name, rel_data)
+#         res = get_comp_text(messages)
+#         orig.at[idx, "text"] = res
+#         orig.to_csv(f"bot_followup_{cp}.csv", index=False)
+#         print(
+#             f"Done {idx + 1}/{len_} ({len_ - idx - 1} left): bot: {bot_name}, creator: {creator_name}, query:{query_id}, round: {row['round_no']}")
 
-    len_ = len(orig)
-    for idx, row in bot_followup.iterrows():
+
+
+
+lock = Lock()
+
+def parallel_function(idx, row, data, orig, len_):
+    try:
         data = data[data["round_no"] < row["round_no"]]
         bot_name = row["username"]
         creator_name = row["creator"]
         query_id = row["query_id"]
         print(
-            f"Starting {idx + 1}/{len_} ({len_ - idx} left): bot: {bot_name}, creator: {creator_name}, query:{query_id}, round: {row['round_no']}")
+            f"Starting {idx + 1}/{len_}: bot: {bot_name}, creator: {creator_name}, query:{query_id}, round: {row['round_no']}")
         rel_data = data[data['query_id'] == query_id]
         messages = get_messages(bot_name, creator_name, rel_data)
         res = get_comp_text(messages)
-        orig.at[idx, "text"] = res
-        orig.to_csv(f"bot_followup_{cp}.csv", index=False)
+        with lock:
+            orig.at[idx, "text"] = res
+            orig.to_csv(f"bot_followup_{cp}.csv", index=False)
         print(
-            f"Done {idx + 1}/{len_}: bot: {bot_name}, creator: {creator_name}, query:{query_id}, round: {row['round_no']}")
-    x = 1
+            f"Done {idx + 1}/{len_} ({len_ - idx - 1} left): bot: {bot_name}, creator: {creator_name}, query:{query_id}, round: {row['round_no']}")
+    except Exception as e:
+        print(f"An error occurred for index {idx}: {e}")
+
+if __name__ == '__main__':
+    orig = pd.read_csv(f"bot_followup_{cp}.csv")
+    bot_followup = orig[orig['text'].isna()]
+    data = pd.read_csv('greg_data.csv')
+
+    len_ = len(orig)
+
+    with ThreadPoolExecutor(max_workers=11) as executor:  # Change max_workers as needed
+        futures = {executor.submit(parallel_function, idx, row, data.copy(), orig, len_): row for idx, row in bot_followup.iterrows()}
+        for future in as_completed(futures):
+            row = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                print(f"An error occurred in future: {e}")
+
+    print("All tasks completed.")

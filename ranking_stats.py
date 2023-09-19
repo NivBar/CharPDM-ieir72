@@ -1,10 +1,11 @@
 import os
-import pandas as pd
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
 from config import current_prompt as cp
+from tqdm import tqdm
+import numpy as np
+import pandas as pd
+import warnings
+
+warnings.filterwarnings("ignore")
 
 file_path = f'/lv_local/home/niv.b/content_modification_code-master/Results/RankedLists/LambdaMART{cp}'
 
@@ -18,7 +19,8 @@ data = []
 for line in lines:
     values = line.strip().split()
     query_id, _, document_id, rank, score, method = values
-    data.append([query_id, 'Q0', document_id, int(rank), float(score), method])
+    query_id_padded = "{:03}".format(int(query_id))
+    data.append([query_id_padded, 'Q0', document_id, int(rank), float(score), method])
 
 df = pd.DataFrame(data, columns=columns).drop(["Q0", "method"], axis=1)
 
@@ -46,27 +48,187 @@ for filename in tqdm(os.listdir(folder_path)):
 
 df.to_csv(f"feature_data_{cp}.csv", index=False)
 
-#### visualization ####
+#### new features ####
+df = pd.read_csv(f"feature_data_{cp}.csv").drop("rank", axis=1)
+df[["round_no", "query_id", "username", "creator"]] = df["docno"].apply(lambda x: pd.Series(x.split("-")))
+df.round_no, df.query_id = df.round_no.astype(int), df.query_id.astype(int)
 
-cols = ['rank', 'score', 'docCoverQueryNum',
-        'docBoolean.OR', 'docEnt', 'docVSM', 'docFracStops', 'docTF', 'docBM25',
-        'docTFIDF', 'docCoverQueryRatio', 'docIDF', 'docTFNorm',
-        'docBoolean.AND', 'docLMIR.JM', 'docLMIR.DIR', 'docStopCover', 'docLen',
-        'docLMIR.ABS']
+greg_data = pd.read_csv("greg_data.csv")[['round_no', 'query_id', 'username', 'position']].rename(
+    {"position": "original_position"}, axis=1)
+greg_data.round_no, greg_data.query_id, greg_data.username = greg_data.round_no.astype(int), greg_data.query_id.astype(int), greg_data.username.astype(str)
+df = df.merge(greg_data, on=['round_no', 'query_id', 'username'], how='left')
 
-thresh = 0.2
-label = "score"
+first_round = []
+for _, row in greg_data[greg_data.round_no == 1].iterrows():
+    query_str = '0' + str(row.query_id)
+    docno = f"01-{query_str[-3:]}-{row.username}-creator"
+    first_round.append(
+        {"round_no": row.round_no, "query_id": row.query_id, "creator": "creator", "username": row.username,
+         "docno": docno, "original_position": row.original_position})
+first_df = pd.DataFrame(first_round)
+df = pd.concat([first_df, df]).reset_index(drop=True)
+df.round_no, df.query_id = df.round_no.astype(int), df.query_id.astype(int)
+df.set_index("docno", inplace=True)
 
-correlations = df[cols].corr()[label]
+# Looping through each row in the DataFrame
+for idx, row in df.iterrows():
+    # If it's the first round, set 'previous_docno' to NaN and move to the next row
+    if row.round_no == 1:
+        df.loc[idx, "previous_docno"] = np.nan
+        continue
 
-correlations = pd.DataFrame(correlations)  # Convert to DataFrame
-correlations = correlations[(np.abs(correlations[label]) >= thresh) & (correlations[label] != 1)].reindex(
-    np.abs(correlations[(np.abs(correlations[label]) >= thresh) & (correlations[label] != 1)][label]).sort_values(
-        ascending=False).index)
-# correlations = correlations[(np.abs(correlations[label]) >= thresh) & (correlations[label] != 1)]
+    if row.creator != "creator":
+        prev_docno = df.index[
+            (df.round_no == row.round_no - 1) & (df.query_id == row.query_id) & (df.creator == "creator") & (
+                    df.username == row.creator)].tolist()[0]
+    else:
+        prev_docno = df.index[
+            (df.round_no == row.round_no - 1) & (df.query_id == row.query_id) & (df.creator == "creator") & (
+                    df.username == row.username)].tolist()[0]
 
-g = sns.heatmap(correlations, annot=True, cmap="RdYlGn", vmin=-1, vmax=1)
-g.set_title("Rank Correlations")
+    # Set the 'previous_docno' and 'previous_pos' for the current row based on the found 'previous_docno'
+    df.loc[idx, "previous_docno"] = prev_docno
+    df.loc[idx, "previous_pos"] = df[df.index == prev_docno].original_position.values[0]
 
-plt.tight_layout()
-plt.show()
+    # addition
+    # df.loc[idx, "BOT_previous_pos"] = \
+    # df[(df.query_id == row.query_id) & (df.round_no == row.round_no - 1) & (df.username == 'BOT')].dropna(
+    #     subset=["original_position"]).original_position.values[0]
+    # addition
+
+# Save the DataFrame to a new CSV file "feature_data_4_new.csv"
+# df.to_csv("feature_data_4_new.csv")
+
+# Grouping the DataFrame by 'round_no' and 'query_id' for further processing
+df_gb = df.groupby(["round_no", "query_id"])
+
+# Looping through each group
+for group_name, df_group in tqdm(df_gb):
+    # Splitting the group into 'non_bots' (where 'creator' is "creator") and 'bots' (where 'creator' is not "creator")
+    if group_name[0] == 1:
+        continue
+    non_bots = df_group[df_group.creator == "creator"]
+    bots = df_group[df_group.creator != "creator"]
+
+    # Looping through each row in 'bots' group to calculate 'current_pos' for each bot
+    for idx, row in bots.iterrows():
+        # Concatenating the 'non_bots' group and the current bot row to create a comparison DataFrame
+        comp_df = pd.concat([non_bots, row.to_frame().T])
+
+        # Removing the current bot from the comparison DataFrame
+        comp_df = comp_df[(comp_df.username != row.creator) | (comp_df.creator == row.username)]
+
+        # Calculating ranks based on the 'score' column in the comparison DataFrame
+        comp_df['rank'] = comp_df['score'].rank(ascending=False, method='dense')
+
+        # Setting the 'current_pos' for the current bot in the main DataFrame
+        assert comp_df.loc[idx, "rank"] % 1 == 0
+        df.loc[idx, "current_pos"] = comp_df.loc[idx, "rank"]
+
+        # if row.creator == "BOT":
+        #     df.loc[idx, "BOT_current_pos"] = df.loc[idx, "current_pos"]
+        #     df.loc[idx, "win_over_BOT"] = np.nan
+        #     continue
+        # df.loc[idx, "BOT_current_pos"] = comp_df.loc[comp_df[comp_df.username == 'BOT'].index[0], "rank"] if not \
+        #     comp_df[comp_df.username == 'BOT'].empty else np.nan
+        # df.loc[idx, "win_over_BOT"] = True if df.loc[idx, "current_pos"] <= df.loc[idx, "BOT_current_pos"] else False
+
+df['pos_diff'] = df.apply(
+    lambda row: row['current_pos'] - row['previous_pos'] if pd.notna(row['current_pos']) and pd.notna(
+        row['previous_pos']) else np.nan, axis=1)
+
+df['scaled_pos_diff'] = np.where(pd.isna(df['pos_diff']), np.nan,
+                                 np.where(df['pos_diff'] > 0, df['pos_diff'] / (5 - df['previous_pos']),
+                                          df['pos_diff'] / (df['previous_pos'] - 1)))
+df['scaled_pos_diff'] = np.where(pd.notna(df['scaled_pos_diff']), df['scaled_pos_diff'],
+                                 np.where(df['pos_diff'] == 0, 0,
+                                          np.nan))
+# addition
+
+# df['BOT_pos_diff'] = df.apply(
+#     lambda row: row['BOT_current_pos'] - row['BOT_previous_pos'] if pd.notna(row['BOT_current_pos']) and pd.notna(
+#         row['BOT_previous_pos']) else np.nan, axis=1)
+#
+# df['BOT_scaled_pos_diff'] = np.where(pd.isna(df['BOT_pos_diff']), np.nan,
+#                                  np.where(df['BOT_pos_diff'] > 0, df['BOT_pos_diff'] / (5 - df['BOT_previous_pos']),
+#                                           df['BOT_pos_diff'] / (df['BOT_previous_pos'] - 1)))
+# df['BOT_scaled_pos_diff'] = np.where(pd.notna(df['BOT_scaled_pos_diff']), df['BOT_scaled_pos_diff'],
+#                                  np.where(df['BOT_pos_diff'] == 0, 0,
+#                                           np.nan))
+# addition
+
+
+# Resetting the index of the DataFrame
+df.reset_index(inplace=True)
+
+# Updating the 'original_position' column based on the 'previous_docno'
+df["original_position"] = df.apply(
+    lambda row: df[df.docno == row.docno.replace(row.creator, 'creator').replace(row.username,
+                                                                                 row.creator)].original_position.values[
+        0] if pd.isna(row.original_position) and not
+    df[df.docno == row.docno.replace(row.creator, 'creator').replace(row.username,
+                                                                     row.creator)].empty else row.original_position,
+    axis=1)
+
+#TODO: pay attention to this line
+# df.loc[df.original_position.isna(), 'original_position'] = df[df.original_position.isna()].apply(
+#     lambda row: df.loc[df.docno == row.docno.replace('-BOT', '-creator').replace(row.username,
+#                                                                                  row.creator), 'original_position'].values[
+#         0], axis=1)
+
+def fill_original_position(row):
+    target_docno = row.docno.replace(row.username, row.creator)
+    target_values = df.loc[df.docno == target_docno, 'original_position'].values
+
+    if len(target_values) == 0:
+        print(f"No match found for docno: {target_docno}")
+        return np.nan  # or some other value that makes sense in your context
+
+    return target_values[0]
+
+df.loc[df.original_position.isna(), 'original_position'] = df[df.original_position.isna()].apply(fill_original_position, axis=1)
+
+
+# df.loc[df.creator == 'BOT', 'win_over_BOT'] = np.where(df[df.creator == 'BOT']['current_pos'] - df[df.creator == 'BOT']['original_position'] <= 0, True, False)
+# Calculating 'orig_pos_diff' as the difference between 'current_pos' and 'original_position'
+# Calculating 'scaled_orig_pos_diff' based on 'orig_pos_diff', considering some conditions
+df['orig_pos_diff'] = df.apply(
+    lambda row: row['current_pos'] - row['original_position'] if pd.notna(row['current_pos']) and pd.notna(
+        row['original_position']) else np.nan, axis=1)
+
+df['scaled_orig_pos_diff'] = np.where(pd.isna(df['orig_pos_diff']), np.nan,
+                                      np.where(df['orig_pos_diff'] > 0,
+                                               df['orig_pos_diff'] / (5 - df['original_position']),
+                                               df['orig_pos_diff'] / (df['original_position'] - 1)))
+df['scaled_orig_pos_diff'] = np.where(pd.notna(df['scaled_orig_pos_diff']), df['scaled_pos_diff'],
+                                      np.where(df['orig_pos_diff'] == 0, 0,
+                                               np.nan))
+
+# Save the final DataFrame to a new CSV file "feature_data_4_new.csv"
+df = df[df.round_no != 1]
+df.to_csv(f"feature_data_{cp}_new.csv", index=False)
+
+# #### visualization ####
+#
+# cols = ['rank', 'score', 'docCoverQueryNum',
+#         'docBoolean.OR', 'docEnt', 'docVSM', 'docFracStops', 'docTF', 'docBM25',
+#         'docTFIDF', 'docCoverQueryRatio', 'docIDF', 'docTFNorm',
+#         'docBoolean.AND', 'docLMIR.JM', 'docLMIR.DIR', 'docStopCover', 'docLen',
+#         'docLMIR.ABS']
+#
+# thresh = 0.2
+# label = "score"
+#
+# correlations = df[cols].corr()[label]
+#
+# correlations = pd.DataFrame(correlations)  # Convert to DataFrame
+# correlations = correlations[(np.abs(correlations[label]) >= thresh) & (correlations[label] != 1)].reindex(
+#     np.abs(correlations[(np.abs(correlations[label]) >= thresh) & (correlations[label] != 1)][label]).sort_values(
+#         ascending=False).index)
+# # correlations = correlations[(np.abs(correlations[label]) >= thresh) & (correlations[label] != 1)]
+#
+# g = sns.heatmap(correlations, annot=True, cmap="RdYlGn", vmin=-1, vmax=1)
+# g.set_title("Rank Correlations")
+#
+# plt.tight_layout()
+# plt.show()

@@ -3,25 +3,28 @@ import pandas as pd
 from config import current_prompt as cp
 from tqdm import tqdm
 
-texts = pd.read_csv(f"bot_followup_{cp}.csv").sort_values(['query_id','round_no'])
-# texts["round_no"] = 4
+texts = pd.read_csv(f"bot_followup_{cp}.csv").sort_values(['query_id', 'round_no']).dropna()
 greg_data = pd.read_csv("greg_data.csv").rename({"current_document": "text"}, axis=1)
 greg_data["creator"] = "creator"
 names = greg_data[["query_id", "query"]].set_index('query_id').to_dict()['query']
 greg_data = greg_data[texts.columns]
+asrc_df = pd.read_csv("bot_followup_asrc.csv")
+df = pd.concat([greg_data, texts, asrc_df])
+df["docno"] = df.apply(lambda row: "{}-{}-{}-{}".format('0' + str(row.round_no),
+                                                        '0' + str(row.query_id) if row.query_id < 100 else str(
+                                                            row.query_id), row.username, row.creator), axis=1)
 
-df = pd.concat([greg_data, texts])
-df["docno"] = df.apply(lambda row: "{}-{}-{}-{}".format('0' + str(row.round_no),'0' + str(row.query_id) if row.query_id < 100 else str(row.query_id), row.username, row.creator), axis=1)
-
-df = df.dropna()
+df = df[df.round_no!=1]
+df = df.dropna().sort_values(['round_no', 'query_id', 'username']).reset_index(drop=True)
 long_texts = []
 short_texts = []
-for idx, row in tqdm(texts.iterrows()):
-    if len(row.text.split(' ')) < 140:
-        print("SHORT TEXT\n")
-        print(
-            f"idx in file: {idx + 2}, id: {row.query_id}, topic: {names[row.query_id]}, creator: {row.creator}, username: {row.username}, length: {len(row.text.split(' '))}\n")
-        short_texts.append(idx + 2)
+for idx, row in tqdm(df.iterrows()):
+
+    # if len(row.text.split(' ')) < 140:
+    #     print("SHORT TEXT\n")
+    #     print(
+    #         f"idx in file: {idx + 2}, id: {row.query_id}, topic: {names[row.query_id]}, creator: {row.creator}, username: {row.username}, length: {len(row.text.split(' '))}\n")
+    #     short_texts.append(idx + 2)
 
     if len(row.text.split(' ')) > 150:
         print("LONG TEXT! CHANGE!\n")
