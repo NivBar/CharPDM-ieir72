@@ -277,6 +277,13 @@ if __name__ == '__main__':
     bot_followup = orig[orig['text'].isna()]
     data = pd.read_csv('greg_data.csv')
 
+    if 'STATBOT' not in list(orig.username.unique()):
+        stat_df = pd.merge(orig[['round_no','query_id','creator']].drop_duplicates(), data, how='left', right_on = ['round_no','query_id','username'], left_on = ['round_no','query_id','creator']).rename({"current_document": "text"}, axis=1)[bot_followup.columns]
+        stat_df["username"] = "STATBOT"
+        stat_df['text'] = stat_df['text'].str.strip()
+        orig = pd.concat([orig, stat_df], ignore_index=True)
+        orig.to_csv(f"bot_followup_{cp}.csv", index=False)
+
     len_ = len(orig)
 
     with ThreadPoolExecutor(max_workers=11) as executor:  # Change max_workers as needed
