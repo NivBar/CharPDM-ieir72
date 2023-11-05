@@ -3,15 +3,16 @@ import glob
 import pandas as pd
 # group,query_id,username,text
 from itertools import product
-from config import current_prompt as cp
+from config import current_prompt as cp, ACTIVE_BOTS
 
 greg_data = pd.read_csv("greg_data.csv")
 greg_data = greg_data[(greg_data.round_no.isin([6,7])) & (greg_data.position.between(2,5))] #training + testing setting from the article
-bots = ["MABOT", "MTBOT", "NMABOT", "NMTBOT"]
+# bots = ["MABOT", "MTBOT", "NMABOT", "NMTBOT"]
+bots = ACTIVE_BOTS # bots using prompt bank
 queries = greg_data["query_id"].unique()
+
 rounds = list(greg_data["round_no"].unique())
-if 1 in rounds:
-    rounds.remove(1)
+if 1 in rounds: rounds.remove(1)
 gb_df = greg_data.groupby("query_id")
 
 rows = []
@@ -41,5 +42,20 @@ merged_df = pd.merge(merged_df, greg_data, left_on=['query_id', 'round_no', 'cre
 final_df = pd.concat([df, asrc_df], ignore_index=True).sort_values(["query_id", "username"])
 final_df = pd.merge(final_df,merged_df.drop("_merge",axis=1), indicator=True, how='outer', on=["round_no","query_id","creator"]).query('_merge=="left_only"').drop('_merge', axis=1).rename({"username_x":"username"}, axis=1)
 final_df = final_df[["round_no","query_id","creator","username","text"]]
+
+# incorporate previous versions' texts
+keep_texts = False
+if keep_texts:
+    filtered_final_df = final_df[final_df.username != 'BOT']
+    filtered_csv_df = pd.read_csv(f"bot_followup_{cp - 1}.csv")[lambda x: x.username != 'BOT']
+    merged_df = pd.merge(filtered_final_df, filtered_csv_df, how='left',
+                         on=['round_no', 'query_id', 'creator', 'username']).drop('text_x', axis=1).rename(
+        columns={'text_y': 'text'})
+    final_df.loc[final_df.username != 'BOT', 'text'] = merged_df['text']
+
+#TODO: testing, delete to use all queries
+queries = queries[:3]
+final_df = final_df[(final_df.query_id.isin(queries)) & (final_df.username != 'BOT')]
+
 final_df.to_csv(f"bot_followup_{cp}.csv", index=False)
 print(final_df)

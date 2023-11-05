@@ -28,24 +28,26 @@ df = df.dropna().sort_values(['round_no', 'query_id', 'username']).reset_index(d
 
 
 
-# long_texts = []
-# short_texts = []
-# for idx, row in tqdm(df.iterrows()):
-#
-#     # if len(row.text.split(' ')) < 140:
-#     #     print("SHORT TEXT\n")
-#     #     print(
-#     #         f"idx in file: {idx + 2}, id: {row.query_id}, topic: {names[row.query_id]}, creator: {row.creator}, username: {row.username}, length: {len(row.text.split(' '))}\n")
-#     #     short_texts.append(idx + 2)
-#
-#     if len(row.text.split(' ')) > 150:
-#         print("LONG TEXT! CHANGE!\n")
-#         print(
-#             f"idx in file: {idx + 2}, id: {row.query_id}, topic: {names[row.query_id]}, creator: {row.creator}, username: {row.username}, length: {len(row.text.split(' '))}\n")
-#         long_texts.append(idx + 2)
-#
-# print("long texts:", sorted(long_texts))
-# print("short texts:", sorted(short_texts))
+long_texts = []
+short_texts = []
+for idx, row in tqdm(df.iterrows()):
+    if "BOT" not in str(row.username):
+        continue
+
+    if len(row.text.split(' ')) < 140:
+        # print("SHORT TEXT\n")
+        # print(
+        #     f"idx in file: {idx + 2}, id: {row.query_id}, topic: {names[row.query_id]}, creator: {row.creator}, username: {row.username}, length: {len(row.text.split(' '))}\n")
+        short_texts.append(idx + 2)
+
+    if len(row.text.split(' ')) > 150:
+        # print("LONG TEXT! CHANGE!\n")
+        # print(
+        #     f"idx in file: {idx + 2}, id: {row.query_id}, topic: {names[row.query_id]}, creator: {row.creator}, username: {row.username}, length: {len(row.text.split(' '))}\n")
+        long_texts.append(idx + 2)
+
+print("long texts:", sorted(long_texts))
+print("short texts:", sorted(short_texts))
 
 # create trectext format
 bot_followup_docnos = 0
