@@ -1,9 +1,13 @@
 import random
+import re
 from pprint import pprint
+from nltk.corpus import stopwords
 
 import openai
 import pandas as pd
 from API_key import API_key
+
+stop_words = set(stopwords.words('english'))
 
 current_prompt = "asrc"
 
@@ -60,9 +64,17 @@ comp_data = pd.read_csv("Archive/comp_dataset.csv")
 query_index = {x[0]: x[1] for x in comp_data[["query_id", "query"]].drop_duplicates().values.tolist()}
 
 
+def get_unique_words(string):
+    cleaned_string = re.sub(r'[^\w\s]', '', string.lower())
+    words = cleaned_string.split()
+    unique_words = set(words)
+    unique_words = unique_words - stop_words
+    return str(unique_words).replace("{", "").replace("}", "").replace("'", "")
+
+
 def get_prompt(bot_name, data, creator_name, query_id):
-    method, traits = bot_name.split(
-        "_")  # bot names - {method}_[query no}{example no}{candidate inc}{query inc}{doc type}{history len}
+    method, traits = bot_name.split("_")
+    # bot names - {method}_[query no}{example no}{candidate inc}{query inc}{doc type}{history len}
     bot_info = {"method": method, "query_num": int(traits[0]), "ex_num": int(traits[1]),
                 "cand_inc": True if traits[2] == "1" else False,
                 "query_inc": True if traits[3] == "1" else False}
@@ -85,27 +97,8 @@ def get_prompt(bot_name, data, creator_name, query_id):
             "current_document"].values[0].strip()
     current_rank = \
         recent_data[(recent_data.round_no == epoch) & (recent_data.username == creator_name)]["position"].values[0]
-    previos_doc = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == creator_name)][
-        "current_document"].values[0]
-    previous_rank = \
-        recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == creator_name)]["position"].values[0]
     tops = recent_data[recent_data["position"] == int(min(recent_data["position"]))]
-    tops_docs = "\n\n".join(tops["current_document"].values)
-    bottoms = recent_data[recent_data["position"] == int(max(recent_data["position"]))]
-    bottoms_docs = "\n\n".join(bottoms["current_document"].values)
     top_doc_txt = tops[tops["round_no"] == epoch]["current_document"].values[0]
-    top_doc_user = tops[tops["round_no"] == epoch]["username"].values[0]
-    top_prev_doc = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == top_doc_user)][
-        "current_document"].values[0]
-    top_prev_rank = \
-        recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == top_doc_user)]["position"].values[0]
-    bottom_doc_txt = bottoms[bottoms["round_no"] == epoch]["current_document"].values[0]
-    bottom_doc_user = bottoms[bottoms["round_no"] == epoch]["username"].values[0]
-    bottom_prev_doc = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == bottom_doc_user)][
-        "current_document"].values[0]
-    bottom_prev_rank = \
-        recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == bottom_doc_user)]["position"].values[
-            0]
 
     if bot_info["cand_inc"]:
         message = [{"role": "system",
@@ -117,9 +110,7 @@ def get_prompt(bot_name, data, creator_name, query_id):
         message = [{"role": "system",
                     "content": fr"The candidate document is: {current_doc}"}]
         all_docs = "\n".join(f"* {doc.strip()}" for doc in recent_data[(recent_data.round_no == epoch) &
-                                                                       (
-                                                                               recent_data.username != creator_name)].sort_values(
-            "position")["current_document"].values)
+                    (recent_data.username != creator_name)].sort_values("position")["current_document"].values)
 
     if bot_info["method"] == "POW":
         if query_ids[0] == query_id:
@@ -157,7 +148,7 @@ def get_prompt(bot_name, data, creator_name, query_id):
                 else:
                     rand_doc_row = data[
                         (data["round_no"] == epoch) & (data.username != creator_name) & (data.position != 1) & (
-                                    data.query_id == query_id)].sample(n=1)
+                                data.query_id == query_id)].sample(n=1)
                     rand_doc_txt = rand_doc_row["current_document"].values[0]
                     rand_doc_pos = rand_doc_row["position"].values[0]
                     message_list = [f'Documents ranked 1 and {rand_doc_pos} respectively in epoch {epoch} '
@@ -178,7 +169,7 @@ def get_prompt(bot_name, data, creator_name, query_id):
                     if bot_info["doc_type"] == "T":
                         top_doc_txt = tops[tops["round_no"] == epoch - i]["current_document"].values[0].strip()
                         rand_doc_row = data[(data["round_no"] == epoch - i) & (data.position != 1) & (
-                                    data.query_id == query_id)].sample(n=1)
+                                data.query_id == query_id)].sample(n=1)
                         rand_doc_txt = rand_doc_row["current_document"].values[0].strip()
                         rand_doc_pos = rand_doc_row["position"].values[0]
                         message_list.append(f'Documents ranked 1 and {rand_doc_pos} respectively in epoch {epoch - i} '
@@ -290,13 +281,11 @@ def get_prompt(bot_name, data, creator_name, query_id):
                     message_string += f'In epoch {cand_eps[i]}, ranked {cand_pos[i]}:\n{cand_docs[i].strip()}\n'
                 message_list.append(message_string)
 
-
             if strands > 0:
                 cand_users = data[(data["round_no"].isin(epochs)) & ~(data.username.isin([top_doc_user, creator_name]))
-                                    & (data.query_id == query_id)]['username'].sample(n=strands, replace=False).tolist()
+                                  & (data.query_id == query_id)]['username'].sample(n=strands, replace=False).tolist()
                 cand_doc_rows = data[(data["round_no"].isin(epochs)) & (data.username.isin(cand_users))
-                                    & (data.query_id == query_id)].sort_values("round_no", ascending=False)
-
+                                     & (data.query_id == query_id)].sort_values("round_no", ascending=False)
 
                 for user in cand_users:
                     user_data = cand_doc_rows[cand_doc_rows.username == user]
@@ -319,10 +308,12 @@ def get_prompt(bot_name, data, creator_name, query_id):
 
                 if bot_info["doc_type"] == "T":
                     strands -= 1
-                    top_doc_user = data[(data['query_id'] == qid) & (data["position"] == 1) & (data["round_no"] == epoch)]['username'].values[0]
+                    top_doc_user = \
+                    data[(data['query_id'] == qid) & (data["position"] == 1) & (data["round_no"] == epoch)][
+                        'username'].values[0]
 
                     cand_doc_rows = data[(data["round_no"].isin(epochs)) & (data.username == top_doc_user) &
-                                             (data.query_id == qid)].sort_values("round_no", ascending=False)
+                                         (data.query_id == qid)].sort_values("round_no", ascending=False)
                     cand_pos = cand_doc_rows['position'].values
                     cand_docs = cand_doc_rows['current_document'].values
                     cand_eps = cand_doc_rows['round_no'].values
@@ -333,8 +324,8 @@ def get_prompt(bot_name, data, creator_name, query_id):
 
                 if strands > 0:
                     cand_users = \
-                    data[(data["round_no"].isin(epochs)) & ~(data.username.isin([top_doc_user, creator_name]))
-                         & (data.query_id == qid)]['username'].sample(n=strands, replace=False).tolist()
+                        data[(data["round_no"].isin(epochs)) & ~(data.username.isin([top_doc_user, creator_name]))
+                             & (data.query_id == qid)]['username'].sample(n=strands, replace=False).tolist()
                     cand_doc_rows = data[(data["round_no"].isin(epochs)) & (data.username.isin(cand_users))
                                          & (data.query_id == qid)].sort_values("round_no", ascending=False)
 
@@ -349,63 +340,25 @@ def get_prompt(bot_name, data, creator_name, query_id):
                         message_list.append(message_string)
                 message.append({'role': 'user', 'content': '\n'.join(message_list)})
 
-    # PROMPT_BANK = {
-    #     "INFOBOT1":
-    #         {'role': 'user', 'content': f'This is the document ranked first in epoch {epoch}:\n {top_doc_txt}.\n'
-    #                                     f'Analyze this text to understand why it is ranked first and edit the candidate '
-    #                                     f'document to ensure the edited document ranks first in the next epoch.'},
-    #     "INFOBOT2":
-    #         {'role': 'user', 'content': f'This is the document ranked last in epoch {epoch}:\n {bottom_doc_txt}.\n'
-    #                                     f'Analyze this text to understand why it is ranked last and edit the candidate '
-    #                                     f'document to ensure the edited document ranks first in the next epoch.'},
-    #     "INFOBOT3":
-    #         {'role': 'user', 'content': f'These are the documents ranked first and last in epoch {epoch}:\n'
-    #                                     f'First ranked document:\n {top_doc_txt}.\n Last ranked document:\n {bottom_doc_txt}.\n'
-    #                                     f'Analyze these texts to understand why they were ranked the way they did and '
-    #                                     f'edit the candidate document to ensure the edited document ranks first in the next epoch.'},
-    #     "INFOBOT4":
-    #         {'role': 'user',
-    #          'content': f'This is your document ranked {previous_rank} in epoch {epoch - 1}:\n {previos_doc}.\n'
-    #                     f'Analyze these texts to understand the rank changes if occured and edit the candidate '
-    #                     f'document to ensure the edited document ranks first in the next epoch.'},
-    #     "INFOBOT5":
-    #         {'role': 'user',
-    #          'content': f'These are the ranked documents, ordered from first to last, in epoch {epoch}:\n'
-    #                     f'{all_docs}.\n'
-    #                     f'Analyze these texts to understand why they were ranked the way they did and '
-    #                     f'edit the candidate document to ensure the edited document ranks first in the next epoch.'},
-    #     "OBLIBOT1":
-    #         {'role': 'user', 'content': f'This is the document ranked first in epoch {epoch}:\n {top_doc_txt}.\n'
-    #                                     f'And this is the same user\'s document ranked {top_prev_rank} in epoch {epoch - 1}:\n {top_prev_doc}.\n'
-    #                                     f'Analyze these texts to understand the rank changes if occured and edit the candidate '
-    #                                     f'document to ensure the edited document ranks first in the next epoch.'},
-    #     "OBLIBOT2":
-    #         {'role': 'user', 'content': f'This is the document ranked last in epoch {epoch}: {bottom_doc_txt}.\n'
-    #                                     f'And this is the same user\'s document ranked {bottom_prev_rank} in epoch {epoch - 1}: {bottom_prev_doc}.\n'
-    #                                     f'Analyze these texts to understand the rank changes if occured and edit the candidate '
-    #                                     f'document to ensure the edited document ranks first in the next epoch.'},
-    #     "OBLIBOT3":
-    #         {'role': 'user', 'content': f'These are the top documents from the last 3 epochs:\n'
-    #                                     f'Top docs:\n {tops_docs}\n'
-    #                                     f'Analyze these texts to understand why they were ranked the way they did and '
-    #                                     f'edit the candidate document to ensure the edited document ranks first in the next epoch.'},
-    #     "OBLIBOT4":
-    #         {'role': 'user', 'content': f'These are the bottom documents from the last 3 epochs:\n'
-    #                                     f'Bottom docs:\n {bottoms_docs}\n'
-    #                                     f'Analyze these texts to understand why they were ranked the way they did and '
-    #                                     f'edit the candidate document to ensure the edited document ranks first in the next epoch.'},
-    #     "OBLIBOT5":
-    #         {'role': 'user', 'content': f'These are the top and bottom documents from the last 3 epochs:\n'
-    #                                     f'Bottom docs:\n {bottoms_docs}\n'
-    #                                     f'Top docs:\n {tops_docs}\n'
-    #                                     f'Analyze these texts to understand why they were ranked the way they did and '
-    #                                     f'edit the candidate document to ensure the edited document ranks first in the next epoch.'}
-    # }
-    # message.append(PROMPT_BANK[bot_name])
     pprint(message)
+    message.append({"role": "user",
+                    "content": f'Analyze these texts to understand why they were ranked the way they did and '
+                               f'edit the candidate document to ensure the edited document ranks first in the next epoch.'
+                               f"Utilize the topic keywords ({get_unique_words(recent_data.iloc[0]['query'])}) naturally within the text as much as possible. "
+                               f"Maintain coherence and avoid any meta commentary while generating a fairly long text.\n"
+                               f"Enhanced text:"})
     return message
 
 
 if __name__ == '__main__':
     data = pd.read_csv("sandbox_data.csv")
-    get_prompt("DYN_3311R3", data, 51, 195)
+    bot_names = ["POW_2211", "POW_2201", "POW_2210", "POW_2200",
+                 "PAW_2211T", "PAW_2201T", "PAW_2210T", "PAW_2200T", "PAW_2211R", "PAW_2201R", "PAW_2210R", "PAW_2200R",
+                 "LIW_2211", "LIW_2201", "LIW_2210", "LIW_2200",
+                 "DYN_2211T2", "DYN_2201T2", "DYN_2210T2", "DYN_2200T2", "DYN_2211R2", "DYN_2201R2", "DYN_2210R2",
+                 "DYN_2200R2", "DYN_2211T3", "DYN_2201T3", "DYN_2210T3", "DYN_2200T3", "DYN_2211R3", "DYN_2201R3",
+                 "DYN_2210R3", "DYN_2200R3"]
+    for bname in bot_names:
+        print("bot name: ", bname)
+        get_prompt(bname, data, 51, 195)
+        print("\n\n#########################################################\n\n")
