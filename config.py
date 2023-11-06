@@ -99,6 +99,7 @@ def get_prompt(bot_name, data, creator_name, query_id):
         recent_data[(recent_data.round_no == epoch) & (recent_data.username == creator_name)]["position"].values[0]
     tops = recent_data[recent_data["position"] == int(min(recent_data["position"]))]
     top_doc_txt = tops[tops["round_no"] == epoch]["current_document"].values[0]
+    top_doc_user = tops[tops["round_no"] == epoch]["username"].values[0]
 
     if bot_info["cand_inc"]:
         message = [{"role": "system",
