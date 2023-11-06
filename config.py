@@ -59,46 +59,67 @@ comp_data = pd.read_csv("Archive/comp_dataset.csv")
 
 query_index = {x[0]: x[1] for x in comp_data[["query_id", "query"]].drop_duplicates().values.tolist()}
 
+
 def get_prompt(bot_name, data, creator_name, query_id):
-    method, traits = bot_name.split("_")  # bot names - {method}_[query no}{example no}{candidate inc}{query inc}{doc type}{history len}
-    bot_info = {"method": method, "query_num": int(traits[0]), "ex_num": int(traits[1]), "cand_inc": True if traits[2] == "1" else False,
+    method, traits = bot_name.split(
+        "_")  # bot names - {method}_[query no}{example no}{candidate inc}{query inc}{doc type}{history len}
+    bot_info = {"method": method, "query_num": int(traits[0]), "ex_num": int(traits[1]),
+                "cand_inc": True if traits[2] == "1" else False,
                 "query_inc": True if traits[3] == "1" else False}
     if bot_info["method"] in ["DYN", "PAW"]:
         bot_info["doc_type"] = traits[4]
         if bot_info["method"] == "DYN":
             bot_info["history_len"] = int(traits[5])
 
-    query_ids = random.sample(data[data.query_id != query_id]["query_id"].unique().tolist(),bot_info["query_num"])
+    query_ids = random.sample(data[data.query_id != query_id]["query_id"].unique().tolist(), bot_info["query_num"])
     if bot_info["query_inc"]:
         query_ids[0] = query_id
 
     recent_data = data[data['query_id'] == query_id]
     query_string = recent_data.iloc[0]['query']
     epoch = int(max(recent_data["round_no"]))
-    current_doc = recent_data[(recent_data.round_no == epoch) & (recent_data.username == creator_name)]["current_document"].values[0]
-    current_rank = recent_data[(recent_data.round_no == epoch) & (recent_data.username == creator_name)]["position"].values[0]
-    previos_doc = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == creator_name)]["current_document"].values[0]
-    previous_rank = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == creator_name)]["position"].values[0]
+    current_doc = \
+    recent_data[(recent_data.round_no == epoch) & (recent_data.username == creator_name)]["current_document"].values[0]
+    current_rank = \
+    recent_data[(recent_data.round_no == epoch) & (recent_data.username == creator_name)]["position"].values[0]
+    previos_doc = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == creator_name)][
+        "current_document"].values[0]
+    previous_rank = \
+    recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == creator_name)]["position"].values[0]
     tops = recent_data[recent_data["position"] == int(min(recent_data["position"]))]
     tops_docs = "\n\n".join(tops["current_document"].values)
     bottoms = recent_data[recent_data["position"] == int(max(recent_data["position"]))]
     bottoms_docs = "\n\n".join(bottoms["current_document"].values)
     top_doc_txt = tops[tops["round_no"] == epoch]["current_document"].values[0]
     top_doc_user = tops[tops["round_no"] == epoch]["username"].values[0]
-    top_prev_doc = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == top_doc_user)]["current_document"].values[0]
-    top_prev_rank = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == top_doc_user)]["position"].values[0]
+    top_prev_doc = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == top_doc_user)][
+        "current_document"].values[0]
+    top_prev_rank = \
+    recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == top_doc_user)]["position"].values[0]
     bottom_doc_txt = bottoms[bottoms["round_no"] == epoch]["current_document"].values[0]
     bottom_doc_user = bottoms[bottoms["round_no"] == epoch]["username"].values[0]
-    bottom_prev_doc = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == bottom_doc_user)]["current_document"].values[0]
-    bottom_prev_rank = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == bottom_doc_user)]["position"].values[0]
-    all_docs = "\n\n".join(recent_data[recent_data.round_no == epoch].sort_values("position")["current_document"].values)
+    bottom_prev_doc = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == bottom_doc_user)][
+        "current_document"].values[0]
+    bottom_prev_rank = \
+    recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == bottom_doc_user)]["position"].values[0]
+    # all_docs = "\n".join(recent_data[recent_data.round_no == epoch].sort_values("position")["current_document"].values)
+    # all_docs = "\n".join(f"{i + 1}. {doc}" for i, doc in enumerate(recent_data[recent_data.round_no == epoch].sort_values("position")["current_document"].values))
+    # all_docs = "\n".join(f"{row['position']}. {row['current_document'].strip()}" for _, row in
+    #                      recent_data[
+    #                          (recent_data.round_no == epoch) & (recent_data.username != creator_name)].sort_values(
+    #                          "position").iterrows())
 
     if bot_info["cand_inc"]:
         message = [{"role": "system",
                     "content": fr"The candidate document, ranked {current_rank} in round {epoch} is:\n {current_doc}"}]
+        all_docs = "\n".join(f"{row['position']}. {row['current_document'].strip()}" for _, row in recent_data[
+            (recent_data.round_no == epoch) & (recent_data.username != creator_name)].
+                             sort_values("position").iterrows())
     else:
         message = [{"role": "system",
                     "content": fr"The candidate document is: {current_doc}"}]
+        all_docs = "\n".join(f"* {doc.strip()}" for doc in recent_data[recent_data.round_no == epoch].sort_values("position")
+        ["current_document"].values)
 
     if bot_info["method"] == "POW":
         if query_ids[0] == query_id:
@@ -108,7 +129,8 @@ def get_prompt(bot_name, data, creator_name, query_id):
             if bot_info["ex_num"] > 1:
                 for i in range(1, bot_info["ex_num"]):
                     top_doc_txt = tops[tops["round_no"] == epoch - i]["current_document"].values[0]
-                    message_list.append(f'Document ranked 1 in epoch {epoch - i} in relation to the query mentioned:\n {top_doc_txt}')
+                    message_list.append(f'Document ranked 1 in epoch {epoch - i} in relation to the query mentioned:\n'
+                                        f' {top_doc_txt}')
             message.append({'role': 'user', 'content': '\n\n'.join(message_list)})
 
         if query_ids:
@@ -130,11 +152,15 @@ def get_prompt(bot_name, data, creator_name, query_id):
     elif bot_info["method"] == "LIW":
         if query_ids[0] == query_id:
             query_ids.pop(0)
-            message_list = [f'These are the ranked documents, ordered from first to last, in epoch {epoch} in relation to the query mentioned:\n{all_docs}\n']
+            message_list = [
+                f'These are the candidate document\'s ranked competitors, ordered from highst to lowest, in '
+                f'epoch {epoch} in relation to the query mentioned:\n{all_docs}\n']
 
             if bot_info["ex_num"] > 1:
                 for i in range(1, bot_info["ex_num"]):
-                    all_docs = "\n\n".join(recent_data[recent_data.round_no == epoch - i].sort_values("position")["current_document"].values)
+                    all_docs = "\n".join(f"{i + 1}. {doc.strip()}" for i, doc in enumerate(
+                        recent_data[recent_data.round_no == epoch - i].sort_values("position")
+                        ["current_document"].values))
                     message_list.append(
                         f'Ranked documents, ordered from first to last, in epoch {epoch - i}:\n{all_docs}\n')
             message.append({'role': 'user', 'content': '\n\n'.join(message_list)})
@@ -146,7 +172,11 @@ def get_prompt(bot_name, data, creator_name, query_id):
                 message_list.append(f'In the case of observing the query - {query_string}:\n')
 
                 for i in range(bot_info["ex_num"]):
-                    all_docs = "\n\n".join( data[(data.round_no == epoch - i) & (data['query_id'] == qid)].sort_values("position")["current_document"].values)
+                    all_docs = "\n".join(f"{i + 1}. {doc.strip()}" for i,
+                                                                       doc in
+                                         enumerate(data[(data.round_no == epoch - i) &
+                                                        (data['query_id'] == qid)].sort_values("position")[
+                                                       "current_document"].values))
                     message_list.append(
                         f'Ranked documents, ordered from first to last, in epoch {epoch - i}:\n{all_docs}\n')
                 message.append({'role': 'user', 'content': '\n'.join(message_list)})
@@ -208,6 +238,7 @@ def get_prompt(bot_name, data, creator_name, query_id):
     # }
     # message.append(PROMPT_BANK[bot_name])
     return message
+
 
 if __name__ == '__main__':
     data = pd.read_csv("greg_data.csv")
