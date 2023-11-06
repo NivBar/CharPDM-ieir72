@@ -1,4 +1,5 @@
 import random
+from pprint import pprint
 
 import openai
 import pandas as pd
@@ -71,6 +72,8 @@ def get_prompt(bot_name, data, creator_name, query_id):
         if bot_info["method"] == "DYN":
             bot_info["history_len"] = int(traits[5])
 
+    print(bot_info)
+
     query_ids = random.sample(data[data.query_id != query_id]["query_id"].unique().tolist(), bot_info["query_num"])
     if bot_info["query_inc"]:
         query_ids[0] = query_id
@@ -79,7 +82,7 @@ def get_prompt(bot_name, data, creator_name, query_id):
     query_string = recent_data.iloc[0]['query']
     epoch = int(max(recent_data["round_no"]))
     current_doc = \
-    recent_data[(recent_data.round_no == epoch) & (recent_data.username == creator_name)]["current_document"].values[0]
+    recent_data[(recent_data.round_no == epoch) & (recent_data.username == creator_name)]["current_document"].values[0].strip()
     current_rank = \
     recent_data[(recent_data.round_no == epoch) & (recent_data.username == creator_name)]["position"].values[0]
     previos_doc = recent_data[(recent_data.round_no == epoch - 1) & (recent_data.username == creator_name)][
@@ -118,8 +121,8 @@ def get_prompt(bot_name, data, creator_name, query_id):
     else:
         message = [{"role": "system",
                     "content": fr"The candidate document is: {current_doc}"}]
-        all_docs = "\n".join(f"* {doc.strip()}" for doc in recent_data[recent_data.round_no == epoch].sort_values("position")
-        ["current_document"].values)
+        all_docs = "\n".join(f"* {doc.strip()}" for doc in recent_data[(recent_data.round_no == epoch) &
+                    (recent_data.username != creator_name)].sort_values("position")["current_document"].values)
 
     if bot_info["method"] == "POW":
         if query_ids[0] == query_id:
@@ -136,7 +139,7 @@ def get_prompt(bot_name, data, creator_name, query_id):
         if query_ids:
             for qid in query_ids:
                 message_list = []
-                query_string = tops.iloc[0]['query']
+                query_string = data[data['query_id'] == qid].iloc[0]['query']
                 message_list.append(f'In the case of observing the query - {query_string}:\n')
                 tops = data[(data["position"] == int(min(data["position"]))) & (data["query_id"] == qid)]
 
@@ -168,7 +171,7 @@ def get_prompt(bot_name, data, creator_name, query_id):
         if query_ids:
             for qid in query_ids:
                 message_list = []
-                query_string = tops.iloc[0]['query']
+                query_string = data[data['query_id'] == qid].iloc[0]['query']
                 message_list.append(f'In the case of observing the query - {query_string}:\n')
 
                 for i in range(bot_info["ex_num"]):
@@ -237,9 +240,10 @@ def get_prompt(bot_name, data, creator_name, query_id):
     #                                     f'edit the candidate document to ensure the edited document ranks first in the next epoch.'}
     # }
     # message.append(PROMPT_BANK[bot_name])
+    pprint(message)
     return message
 
 
 if __name__ == '__main__':
-    data = pd.read_csv("greg_data.csv")
-    get_prompt("LIW_2101", data, 51, 195)
+    data = pd.read_csv("sandbox_data.csv")
+    get_prompt("POW_3311", data, 51, 195)
