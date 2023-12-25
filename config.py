@@ -11,7 +11,7 @@ from API_key import API_key
 
 stop_words = set(stopwords.words('english'))
 
-current_prompt = "g3"
+current_prompt = "llama13btest"
 
 #### bot names ####
 # def get_names_dict(markov=False):
@@ -19,11 +19,12 @@ current_prompt = "g3"
 #         return {"all": "MABOT", "tops": "MTBOT", "self": "MSBOT"}
 #     else:
 #         return {"all": "NMABOT", "tops": "NMTBOT", "self": "NMSBOT"}
-bot_cover_df = pd.read_csv("prompt_options.csv")
+bot_cover_df = pd.read_csv("final_options.csv").sort_values(["doc_no", "bot_name"],ascending=True)
+# bot_cover_df = df.loc[df.assign(tag=df['bot_name'].str.split('_').str[0]).groupby('tag')['doc_no'].idxmin()]
+
 # doc num thresholds and row num - {46: 288, 31: 284, 28: 276, 21: 268, 19: 264, 16: 232, 13: 224, 11: 184, 10: 176,
 #                                   9: 156, 7: 140, 6: 84, 5: 80, 4: 44, 3: 28, 2: 4}
-ACTIVE_BOTS = bot_cover_df[bot_cover_df.doc_no <= 19].sort_values(["doc_no", "bot_name"],
-                                                                  ascending=False).bot_name.tolist()
+ACTIVE_BOTS = bot_cover_df.bot_name.tolist()
 
 #### openai parameters ####
 openai.api_key = API_key
@@ -78,6 +79,8 @@ def get_unique_words(string):
 
 
 def get_prompt(bot_name, data, creator_name, query_id):
+    prompt_dict_list = []
+    data['current_document'] = data['current_document'].replace('\n', ' ', regex=True).replace('\\n', ' ', regex=True)
     method, traits = bot_name.split("_")
     # bot names - {method}_[query no}{example no}{candidate inc}{query inc}{doc type}{history len}
     bot_info = {"method": method, "query_num": int(traits[0]), "ex_num": int(traits[1]),
@@ -109,51 +112,54 @@ def get_prompt(bot_name, data, creator_name, query_id):
 
     message = [
         {"role": "system",
-         "content": fr"You are given a candidate document and a query which represents some information need. "
-                    fr"Your goal is to modify the candidate document so it will be ranked as high as possible for the "
+         "content": fr"You are given a query and a candidate document which represents some information need. "
+                    fr"Your goal is to enhance the candidate document so it will be ranked as high as possible for the "
                     fr"query by a search engine, The rank of the most highly ranked document is 1. "
                     fr"The ranking function is undisclosed, but you are provided with "
-                    fr"information about past rankings it induced : \n\n query: {query_string}"}]
+                    fr"information about past rankings it induced."}]
 
     if bot_info["cand_inc"]:
-        message.append({"role": "system",
-                        "content": fr"\n\ncandidate document:{current_doc}\n {epoch_phrasing[epoch]} rank of candidate document: {current_rank}"})
+        # message.append({"role": "system",
+        #                 "content": fr"\n\nquery: {query_string}\n\ncandidate document: {current_doc}\n\n{epoch_phrasing[epoch]} ranking: {current_rank}"})
         all_docs = "\n".join(f"{row['position']}. {row['current_document'].strip()}" for _, row in recent_data[
             (recent_data.round_no == epoch) & (recent_data.username != creator_name)].
                              sort_values("position").iterrows())
     else:
-        message.append({"role": "system",
-                        "content": fr"\n\ncandidate document is: {current_doc}"})
-        all_docs = "\n".join(f"* {doc.strip()}" for doc in recent_data[(recent_data.round_no == epoch) &
-                                                                       (
-                                                                               recent_data.username != creator_name)].sort_values(
-            "position")["current_document"].values)
+        # message.append({"role": "system",
+        #                 "content": fr"\n\nquery: {query_string}\n\ncandidate document: {current_doc}"})
+        all_docs = "\n".join(f"\n\n* {doc.strip()}" for doc in recent_data[(recent_data.round_no == epoch) &
+                                                                       (recent_data.username != creator_name)].
+                             sort_values("position")["current_document"].values)
 
     if bot_info["method"] == "POW":
         if query_ids[0] == query_id:
             query_ids.pop(0)
-            message_list = [f'Most highly ranked document in the {epoch_phrasing[epoch]} ranking in relation to the '
-                            f'query mentioned:\n {top_doc_txt}']
+            # message_list = [f'Most highly ranked document in the {epoch_phrasing[epoch]} ranking in relation to the '
+            #                 f'query mentioned:\n {top_doc_txt}']
+            message_list = [fr"\n\nquery: {query_string}\n\n* document: {top_doc_txt}\n\n{epoch_phrasing[epoch]} ranking: 1"]
 
             if bot_info["ex_num"] > 1:
                 for i in range(1, bot_info["ex_num"]):
                     top_doc_txt = tops[tops["round_no"] == epoch - i]["current_document"].values[0]
-                    message_list.append(
-                        f'Most highly ranked document in the {epoch_phrasing[epoch - i]} ranking in relation to the query '
-                        f'mentioned:\n{top_doc_txt}')
+                    # message_list.append(
+                    #     f'Most highly ranked document in the {epoch_phrasing[epoch - i]} ranking in relation to the query '
+                    #     f'mentioned:\n{top_doc_txt}')
+                    message_list.append(fr"\n\n* document: {top_doc_txt}\n\n{epoch_phrasing[epoch-i]} ranking: 1")
             message.append({'role': 'user', 'content': '\n\n'.join(message_list)})
 
         if query_ids:
             for qid in query_ids:
                 message_list = []
                 query_string = data[data['query_id'] == qid].iloc[0]['query']
-                message_list.append(f'In the case of observing the query - {query_string}:\n')
+                # message_list.append(f'In the case of observing the query - {query_string}:\n')
+                message_list.append(f"\n\nquery: {query_string}")
                 tops = data[(data["position"] == int(min(data["position"]))) & (data["query_id"] == qid)]
 
                 for i in range(bot_info["ex_num"]):
                     top_doc_txt = tops[tops["round_no"] == epoch - i]["current_document"].values[0]
-                    message_list.append(f'Most highly ranked document in the {epoch_phrasing[epoch - i]} ranking:\n '
-                                        f'{top_doc_txt}')
+                    # message_list.append(f'Most highly ranked document in the {epoch_phrasing[epoch - i]} ranking:\n '
+                    #                     f'{top_doc_txt}')
+                    message_list.append(fr"\n\n* document: {top_doc_txt}\n\n{epoch_phrasing[epoch-i]} ranking: 1")
                 message.append({'role': 'user', 'content': '\n'.join(message_list)})
 
     elif bot_info["method"] == "PAW":
@@ -162,18 +168,21 @@ def get_prompt(bot_name, data, creator_name, query_id):
             if bot_info["doc_type"] == "T":
                 top_doc_txt = tops[tops["round_no"] == epoch]["current_document"].values[0]
                 if bot_info["cand_inc"]:
-                    message_list = [
-                        f'Document most highly ranked in the {epoch_phrasing[epoch]} ranking '
-                        f', surpassing the candidate document, in relation to the query mentioned: \n{top_doc_txt}\n']
+                    # message_list = [
+                    #     f'Document most highly ranked in the {epoch_phrasing[epoch]} ranking '
+                    #     f', surpassing the candidate document, in relation to the query mentioned: \n{top_doc_txt}\n']
+                    message_list = [fr"\n\nquery: {query_string}\n\n* document: {top_doc_txt}\n\n{epoch_phrasing[epoch]} ranking: 1"]
                 else:
                     rand_doc_row = data[
                         (data["round_no"] == epoch) & (data.username != creator_name) & (data.position != 1) & (
                                 data.query_id == query_id)].sample(n=1)
                     rand_doc_txt = rand_doc_row["current_document"].values[0]
                     rand_doc_pos = rand_doc_row["position"].values[0]
-                    message_list = [f'Most highly ranked document and document ranked {rand_doc_pos} respectively in '
-                                    f'epoch {epoch} in relation to the query mentioned:\n1. {top_doc_txt}\n\n'
-                                    f'{rand_doc_pos}. {rand_doc_txt}\n']
+                    # message_list = [f'Most highly ranked document and document ranked {rand_doc_pos} respectively in '
+                    #                 f'epoch {epoch} in relation to the query mentioned:\n1. {top_doc_txt}\n\n'
+                    #                 f'{rand_doc_pos}. {rand_doc_txt}\n']
+                    message_list = [fr"\n\nquery: {query_string}\n\n* document: {top_doc_txt}\n\n{epoch_phrasing[epoch]} ranking: 1\n\n"
+                                    fr"\n\n* document: {rand_doc_txt}\n\n{epoch_phrasing[epoch]} ranking: {rand_doc_pos}"]
             else:
                 if bot_info["cand_inc"]:
                     rand_doc_row = data[
@@ -182,19 +191,24 @@ def get_prompt(bot_name, data, creator_name, query_id):
                         n=1)
                     rand_doc_txt = rand_doc_row["current_document"].values[0]
                     rand_doc_pos = rand_doc_row["position"].values[0]
+                    # message_list = [
+                    #     f'Document ranked {rand_doc_pos} in {epoch_phrasing[epoch]} ranking in relation to the query '
+                    #     f'mentioned:\n{rand_doc_txt}\n']
                     message_list = [
-                        f'Document ranked {rand_doc_pos} in {epoch_phrasing[epoch]} ranking in relation to the query '
-                        f'mentioned:\n{rand_doc_txt}\n']
+                        fr"\n\nquery: {query_string}\n\n* document: {rand_doc_txt}\n\n{epoch_phrasing[epoch]} ranking: {rand_doc_pos}"]
                 else:
                     rand_doc_rows = data[(data["round_no"] == epoch) & (data.username != creator_name) &
                                          (data.query_id == query_id)].sample(n=2, replace=False).sort_values(
                         "position")
                     rand_pos = rand_doc_rows['position'].values
                     rand_docs = rand_doc_rows['current_document'].values
+                    # message_list = [
+                    #     f'Documents ranked {rand_pos[0]} and {rand_pos[1]} respectively in the {epoch_phrasing[epoch]} ranking '
+                    #     f'in relation to the query mentioned: \n'
+                    #     f'{rand_pos[0]}. {rand_docs[0].strip()}\n\n{rand_pos[1]}. {rand_docs[1].strip()}\n']
                     message_list = [
-                        f'Documents ranked {rand_pos[0]} and {rand_pos[1]} respectively in the {epoch_phrasing[epoch]} ranking '
-                        f'in relation to the query mentioned: \n'
-                        f'{rand_pos[0]}. {rand_docs[0].strip()}\n\n{rand_pos[1]}. {rand_docs[1].strip()}\n']
+                        fr"\n\nquery: {query_string}\n\n* document: {rand_docs[0].strip()}\n\n{epoch_phrasing[epoch]} ranking: {rand_pos[0]}\n\n"
+                        fr"\n\n* document: {rand_docs[1].strip()}\n\n{epoch_phrasing[epoch]} ranking: {rand_pos[1]}"]
 
             if bot_info["ex_num"] > 1:
                 for i in range(1, bot_info["ex_num"]):
@@ -204,20 +218,26 @@ def get_prompt(bot_name, data, creator_name, query_id):
                                 data.query_id == query_id)].sample(n=1)
                         rand_doc_txt = rand_doc_row["current_document"].values[0].strip()
                         rand_doc_pos = rand_doc_row["position"].values[0]
-                        message_list.append(f'Most highly ranked document and document ranked {rand_doc_pos} '
-                                            f'respectively in the {epoch_phrasing[epoch - i]} ranking '
-                                            f'in relation to the query mentioned:\n1. {top_doc_txt}\n\n{rand_doc_pos}. '
-                                            f'{rand_doc_txt}\n')
+                        # message_list.append(f'Most highly ranked document and document ranked {rand_doc_pos} '
+                        #                     f'respectively in the {epoch_phrasing[epoch - i]} ranking '
+                        #                     f'in relation to the query mentioned:\n1. {top_doc_txt}\n\n{rand_doc_pos}. '
+                        #                     f'{rand_doc_txt}\n')
+                        message_list = [
+                            fr"\n\nquery: {query_string}\n\n* document: {top_doc_txt}\n\n{epoch_phrasing[epoch-i]} ranking: 1\n\n"
+                            fr"\n\n* document: {rand_doc_txt}\n\n{epoch_phrasing[epoch-i]} ranking: {rand_doc_pos}"]
                     else:
                         rand_doc_rows = data[(data["round_no"] == epoch - i) & (data.username != creator_name) &
                                              (data.query_id == query_id)].sample(n=2, replace=False).sort_values(
                             "position")
                         rand_pos = rand_doc_rows['position'].values
                         rand_docs = rand_doc_rows['current_document'].values
+                        # message_list.append(
+                        #     f'Documents ranked {rand_pos[0]} and {rand_pos[1]} respectively in the {epoch_phrasing[epoch - i]} ranking '
+                        #     f'in relation to the query mentioned:\n{rand_pos[0]}. {rand_docs[0].strip()}\n\n{rand_pos[1]}. '
+                        #     f'{rand_docs[1].strip()}\n')
                         message_list.append(
-                            f'Documents ranked {rand_pos[0]} and {rand_pos[1]} respectively in the {epoch_phrasing[epoch - i]} ranking '
-                            f'in relation to the query mentioned:\n{rand_pos[0]}. {rand_docs[0].strip()}\n\n{rand_pos[1]}. '
-                            f'{rand_docs[1].strip()}\n')
+                        fr"\n\nquery: {query_string}\n\n* document: {rand_docs[0].strip()}\n\n{epoch_phrasing[epoch-i]} ranking: {rand_pos[0]}\n\n"
+                        fr"\n\n* document: {rand_docs[1].strip()}\n\n{epoch_phrasing[epoch-i]} ranking: {rand_pos[1]}")
 
             message.append({'role': 'user', 'content': '\n\n'.join(message_list)})
 
@@ -225,7 +245,7 @@ def get_prompt(bot_name, data, creator_name, query_id):
             for qid in query_ids:
                 message_list = []
                 query_string = data[data['query_id'] == qid].iloc[0]['query']
-                message_list.append(f'In the case of observing the query - {query_string}:\n')
+                # message_list.append(f'In the case of observing the query - {query_string}:\n')
 
                 for i in range(bot_info["ex_num"]):
                     if bot_info["doc_type"] == "T":
@@ -235,26 +255,34 @@ def get_prompt(bot_name, data, creator_name, query_id):
                                 data.query_id == qid)].sample(n=1)
                         rand_doc_txt = rand_doc_row["current_document"].values[0].strip()
                         rand_doc_pos = rand_doc_row["position"].values[0]
+                        # message_list.append(
+                        #     f'Most highly ranked document and document ranked {rand_doc_pos} respectively in the {epoch_phrasing[epoch - i]} ranking: \n'
+                        #     f'1. {top_doc_txt}\n\n{rand_doc_pos}. {rand_doc_txt}\n')
                         message_list.append(
-                            f'Most highly ranked document and document ranked {rand_doc_pos} respectively in the {epoch_phrasing[epoch - i]} ranking: \n'
-                            f'1. {top_doc_txt}\n\n{rand_doc_pos}. {rand_doc_txt}\n')
+                            fr"\n\nquery: {query_string}\n\n* document: {top_doc_txt}\n\n{epoch_phrasing[epoch - i]} ranking: 1\n\n"
+                            fr"\n\n* document: {rand_doc_txt}\n\n{epoch_phrasing[epoch - i]} ranking: {rand_doc_pos}")
                     else:
                         rand_doc_rows = data[(data["round_no"] == epoch - i) & (data.username != creator_name) &
                                              (data.query_id == qid)].sample(n=2, replace=False).sort_values(
                             "position")
                         rand_pos = rand_doc_rows['position'].values
                         rand_docs = rand_doc_rows['current_document'].values
+                        # message_list.append(
+                        #     f'Documents ranked {rand_pos[0]} and {rand_pos[1]} respectively in the {epoch_phrasing[epoch - i]} ranking: \n'
+                        #     f'{rand_pos[0]}. {rand_docs[0].strip()}\n\n{rand_pos[1]}. {rand_docs[1].strip()}\n')
                         message_list.append(
-                            f'Documents ranked {rand_pos[0]} and {rand_pos[1]} respectively in the {epoch_phrasing[epoch - i]} ranking: \n'
-                            f'{rand_pos[0]}. {rand_docs[0].strip()}\n\n{rand_pos[1]}. {rand_docs[1].strip()}\n')
+                            fr"\n\nquery: {query_string}\n\n* document: {rand_docs[0].strip()}\n\n{epoch_phrasing[epoch - i]} ranking: {rand_pos[0]}\n\n"
+                            fr"\n\n* document: {rand_docs[1].strip()}\n\n{epoch_phrasing[epoch - i]} ranking: {rand_pos[1]}")
                 message.append({'role': 'user', 'content': '\n'.join(message_list)})
 
     elif bot_info["method"] == "LIW":
         if query_ids[0] == query_id:
             query_ids.pop(0)
+            # message_list = [
+            #     f'Documents ordered by {epoch_phrasing[epoch]} ranking from highest to lowest in relation to the query '
+            #     f'mentioned:\n{all_docs}\n']
             message_list = [
-                f'Documents ordered by {epoch_phrasing[epoch]} ranking from highest to lowest in relation to the query '
-                f'mentioned:\n{all_docs}\n']
+                f'\n\nquery: {query_string}\n\n* documents ordered by {epoch_phrasing[epoch]} ranking from highest to lowest in relation to the query:\n{all_docs}\n\n']
 
             if bot_info["ex_num"] > 1:
                 for i in range(1, bot_info["ex_num"]):
@@ -262,14 +290,15 @@ def get_prompt(bot_name, data, creator_name, query_id):
                         recent_data[recent_data.round_no == epoch - i].sort_values("position")
                         ["current_document"].values))
                     message_list.append(
-                        f'Documents ranked by {epoch_phrasing[epoch - i]} ranking from highest to lowest:\n{all_docs}\n')
+                        f'\n\n* documents ranked by {epoch_phrasing[epoch - i]} ranking from highest to lowest in relation to the query:\n{all_docs}\n')
             message.append({'role': 'user', 'content': '\n\n'.join(message_list)})
 
         if query_ids:
             for qid in query_ids:
                 message_list = []
                 query_string = data[data['query_id'] == qid].iloc[0]['query']
-                message_list.append(f'In the case of observing the query - {query_string}:\n')
+                # message_list.append(f'In the case of observing the query - {query_string}:\n')
+                message_list.append(f'\n\nquery: {query_string}\n\n')
 
                 for i in range(bot_info["ex_num"]):
                     all_docs = "\n".join(f"{i + 1}. {doc.strip()}" for i,
@@ -278,7 +307,7 @@ def get_prompt(bot_name, data, creator_name, query_id):
                                                         (data['query_id'] == qid)].sort_values("position")[
                                                        "current_document"].values))
                     message_list.append(
-                        f'Documents ranked by {epoch_phrasing[epoch - i]} ranking from highest to lowest:\n{all_docs}\n')
+                        f'\n\n* documents ranked by {epoch_phrasing[epoch - i]} ranking from highest to lowest:\n{all_docs}\n')
                 message.append({'role': 'user', 'content': '\n'.join(message_list)})
 
     elif bot_info["method"] == "DYN":
@@ -295,10 +324,12 @@ def get_prompt(bot_name, data, creator_name, query_id):
                 cand_pos = cand_doc_rows['position'].values
                 cand_docs = cand_doc_rows['current_document'].values
                 cand_eps = cand_doc_rows['round_no'].values
-                message_string = f'The ranking history of the user that created the most highly ranked document in ' \
-                                 f'relation to the query mentioned is as follows:\n'
+                # message_string = f'The ranking history of the user that created the most highly ranked document in ' \
+                #                  f'relation to the query mentioned is as follows:\n'
+                message_string = f'fr"\n\nquery: {query_string}\n\nranking history of the user that ranked 1 in {epoch_phrasing[epoch]} ranking:\n'
                 for i in range(len(cand_eps)):
-                    message_string += f'In the {epoch_phrasing[cand_eps[i]]} ranking, ranked {cand_pos[i]}:\n{cand_docs[i].strip()}\n'
+                    # message_string += f'In the {epoch_phrasing[cand_eps[i]]} ranking, ranked {cand_pos[i]}:\n{cand_docs[i].strip()}\n'
+                    message_string += fr"\n\n* document: {cand_docs[i].strip()}\n\n{epoch_phrasing[cand_eps[i]]} ranking: {cand_pos[i]}"
                 message_list.append(message_string)
 
             # candidate doc strand
@@ -309,9 +340,11 @@ def get_prompt(bot_name, data, creator_name, query_id):
                 cand_pos = cand_doc_rows['position'].values
                 cand_docs = cand_doc_rows['current_document'].values
                 cand_eps = cand_doc_rows['round_no'].values
-                message_string = f'The ranking history of the user that created the candidate document is as follows:\n'
+                # message_string = f'The ranking history of the user that created the candidate document is as follows:\n'
+                message_string = f'fr"\n\nquery: {query_string}\n\nranking history of the user that ranked {cand_pos[0]} in {epoch_phrasing[epoch]} ranking:\n'
                 for i in range(len(cand_eps)):
-                    message_string += f'In the {epoch_phrasing[cand_eps[i]]} ranking, ranked {cand_pos[i]}:\n{cand_docs[i].strip()}\n'
+                    # message_string += f'In the {epoch_phrasing[cand_eps[i]]} ranking, ranked {cand_pos[i]}:\n{cand_docs[i].strip()}\n'
+                    message_string += fr"\n\n* document: {cand_docs[i].strip()}\n\n{epoch_phrasing[cand_eps[i]]} ranking: {cand_pos[i]}"
                 message_list.append(message_string)
 
             if strands > 0:
@@ -325,10 +358,12 @@ def get_prompt(bot_name, data, creator_name, query_id):
                     cand_pos = user_data['position'].values
                     cand_docs = user_data['current_document'].values
                     cand_eps = user_data['round_no'].values
-                    message_string = f'The ranking history of the user that created the document ranked {cand_pos[0]} in relation to the ' \
-                                     f'query mentioned is as follows:\n'
+                    # message_string = f'The ranking history of the user that created the document ranked {cand_pos[0]} in relation to the ' \
+                    #                  f'query mentioned is as follows:\n'
+                    message_string = f'fr"\n\nquery: {query_string}\n\nranking history of the user that ranked {cand_pos[0]} in {epoch_phrasing[epoch]} ranking:\n'
                     for i in range(len(cand_eps)):
-                        message_string += f'In the {epoch_phrasing[cand_eps[i]]} ranking, ranked {cand_pos[i]}:\n{cand_docs[i].strip()}\n'
+                        # message_string += f'In the {epoch_phrasing[cand_eps[i]]} ranking, ranked {cand_pos[i]}:\n{cand_docs[i].strip()}\n'
+                        message_string += fr"\n\n* document: {cand_docs[i].strip()}\n\n{epoch_phrasing[cand_eps[i]]} ranking: {cand_pos[i]}"
                     message_list.append(message_string)
 
             message.append({'role': 'user', 'content': '\n\n'.join(message_list)})
@@ -337,7 +372,8 @@ def get_prompt(bot_name, data, creator_name, query_id):
             for qid in query_ids:
                 strands = bot_info["ex_num"]
                 query_string = data[data['query_id'] == qid].iloc[0]['query']
-                message_list = [f'In the case of observing the query - {query_string}:\n']
+                # message_list = [f'In the case of observing the query - {query_string}:\n']
+                message_list = []
 
                 if bot_info["doc_type"] == "T":
                     strands -= 1
@@ -350,9 +386,11 @@ def get_prompt(bot_name, data, creator_name, query_id):
                     cand_pos = cand_doc_rows['position'].values
                     cand_docs = cand_doc_rows['current_document'].values
                     cand_eps = cand_doc_rows['round_no'].values
-                    message_string = f'The ranking history of the user that created the most highly ranked document is as follows:\n'
+                    # message_string = f'The ranking history of the user that created the most highly ranked document is as follows:\n'
+                    message_string = f'fr"\n\nquery: {query_string}\n\nranking history of the user that ranked 1 in {epoch_phrasing[epoch]} ranking:\n'
                     for i in range(len(cand_eps)):
-                        message_string += f'In the {epoch_phrasing[cand_eps[i]]} ranking, ranked {cand_pos[i]}:\n{cand_docs[i].strip()}\n'
+                        # message_string += f'In the {epoch_phrasing[cand_eps[i]]} ranking, ranked {cand_pos[i]}:\n{cand_docs[i].strip()}\n'
+                        message_string += fr"\n\n* document: {cand_docs[i].strip()}\n\n{epoch_phrasing[cand_eps[i]]} ranking: {cand_pos[i]}"
                     message_list.append(message_string)
 
                 if strands > 0:
@@ -367,31 +405,50 @@ def get_prompt(bot_name, data, creator_name, query_id):
                         cand_pos = user_data['position'].values
                         cand_docs = user_data['current_document'].values
                         cand_eps = user_data['round_no'].values
-                        message_string = f'The ranking history of the user that created the document ranked {cand_pos[0]} is as follows:\n'
+                        # message_string = f'The ranking history of the user that created the document ranked {cand_pos[0]} is as follows:\n'
+                        message_string = f'fr"\n\nquery: {query_string}\n\nranking history of the user that ranked {cand_pos[0]} in {epoch_phrasing[epoch]} ranking:\n'
                         for i in range(len(cand_eps)):
-                            message_string += f'In the {epoch_phrasing[cand_eps[i]]} ranking, ranked {cand_pos[i]}:\n{cand_docs[i].strip()}\n'
+                            # message_string += f'In the {epoch_phrasing[cand_eps[i]]} ranking, ranked {cand_pos[i]}:\n{cand_docs[i].strip()}\n'
+                            message_string += fr"\n\n* document: {cand_docs[i].strip()}\n\n{epoch_phrasing[cand_eps[i]]} ranking: {cand_pos[i]}"
                         message_list.append(message_string)
                 message.append({'role': 'user', 'content': '\n'.join(message_list)})
         x = 1
 
-    message.append({"role": "user",
-                    "content": f'Analyze these documents to understand why they were ranked the way they did and '
-                               f'edit the candidate document to ensure it is the most highly ranked document in the search engine\'s ranking. '
-                               f"Utilize the topic keywords ({get_unique_words(recent_data.iloc[0]['query'])}) naturally within the document as much as possible. "
-                               f"Maintain coherence and avoid any meta commentary while generating a fairly long document.\n"
-                               f"Enhanced document:"})
+    if bot_info["cand_inc"]:
+        message.append({"role": "user",
+                        "content": fr"\n\nquery: {recent_data.iloc[0]['query']}\n\ncandidate document:{current_doc}\n\n {epoch_phrasing[epoch]} ranking: {current_rank}"
+                                   fr"\n\ntask:  Enhance the given candidate document to ensure it is the most highly ranked document in the search engine's ranking in relation to the query. generate only the enhanced document, make it coherent and relevant."})
+    else:
+        message.append({"role": "user",
+                        "content": fr"\n\nquery: {recent_data.iloc[0]['query']}\n\ncandidate document: {current_doc}"
+                                   fr"\n\ntask:  Enhance the given candidate document to ensure it is the most highly ranked document in the search engine's ranking in relation to the query. generate only the enhanced document, make it coherent and relevant."
+                                   fr"\nEnhanced document:"})
+
+
+    # message.append({"role": "user",
+    #                 "content": f"Enhance the given candidate document to ensure it is the most highly ranked document in the "
+    #                            f"search engine\'s ranking.\n\nEnhanced document:"})
+                               # f"by analyzing the viewed documents to understand why they were "
+                               # f"ranked the way they did. Utilize the query keywords "
+                               # f"({get_unique_words(recent_data.iloc[0]['query'])}) naturally within the document as "
+                               # f"much as possible. Maintain coherence and avoid any meta commentary while generating a "
+                               # f"fairly long document.
     # pprint(message)
     return message
 
 # print demo prompt list
-# if __name__ == '__main__':
-#     data = pd.read_csv("sandbox_data.csv")
-#     bot_names = ["POW_2211", "POW_2201", "POW_2210", "POW_2200",
-#                  "PAW_2211T", "PAW_2201T", "PAW_2210T", "PAW_2200T", "PAW_2211R", "PAW_2201R", "PAW_2210R", "PAW_2200R",
-#                  "LIW_2211", "LIW_2201", "LIW_2210", "LIW_2200",
-#                  "DYN_2211T2", "DYN_2201T2", "DYN_2210T2", "DYN_2200T2", "DYN_2211R2", "DYN_2201R2", "DYN_2210R2",
-#                  "DYN_2200R2"]
-#     for bname in bot_names:
-#         print("bot name: ", bname)
-#         get_prompt(bname, data, 51, 195)
-#         print("\n\n#########################################################\n\n")
+if __name__ == '__main__':
+    data = pd.read_csv("sandbox_data.csv")
+    # bot_names = ["POW_2211", "POW_2201", "POW_2210", "POW_2200",
+    #              "PAW_2211T", "PAW_2201T", "PAW_2210T", "PAW_2200T", "PAW_2211R", "PAW_2201R", "PAW_2210R", "PAW_2200R",
+    #              "LIW_2211", "LIW_2201", "LIW_2210", "LIW_2200",
+    #              "DYN_2211T2", "DYN_2201T2", "DYN_2210T2", "DYN_2200T2", "DYN_2211R2", "DYN_2201R2", "DYN_2210R2",
+    #              "DYN_2200R2"]
+    bot_names = ["DYN_1100T2", "POW_1300", "PAW_1301R", "DYN_1201R2", "PAW_1210T", "LIW_1201"]
+    for bname in bot_names:
+        print("bot name: ", bname)
+        res = get_prompt(bname, data, 51, 195)
+        res = [{k:v.replace("\\n", "\n") for k,v in x.items()} for x in res]
+
+        pprint(res)
+        print("\n\n#########################################################\n\n")

@@ -1,17 +1,41 @@
-import glob
-
+import os
+import re
+import shutil
+from pprint import pprint
 import pandas as pd
-# group,query_id,username,text
 from itertools import product
-
 from tqdm import tqdm
+from config import current_prompt as cp, ACTIVE_BOTS, get_prompt
 
-from config import current_prompt as cp, ACTIVE_BOTS
+
+def prepare_directory(dir_path):
+    if os.path.exists(dir_path):
+        shutil.rmtree(dir_path)
+    os.makedirs(dir_path, exist_ok=True)
+
+
+def divide_df(df, n):
+    prepare_directory(f'bot_followup_{cp}')
+    df_len = len(df)
+    dfs = [df[i * df_len // n:(i + 1) * df_len // n] for i in range(n)]
+    for i in range(n):
+        dfs[i].to_csv(f'bot_followup_{cp}/part_{i+1}.csv', index=False)
+    print("division of df to", n, "parts completed")
+
 
 greg_data = pd.read_csv("greg_data.csv")
-greg_data = greg_data[(greg_data.round_no == 6) & (greg_data.position.between(2,5))] #TODO: training setting from the article
-bots = ACTIVE_BOTS # bots using prompt bank
+greg_data = greg_data[
+    (greg_data.round_no == 7) & (greg_data.position.between(2, 5))]  # TODO: test setting from the article
+bots = ACTIVE_BOTS  # bots using prompt bank
+
+# TODO: only include in testing!
+bots = [bot for bot in bots if bot in ["DYN_1100T2", "DYN_1201R2","PAW_1301R","PAW_1210T","POW_1300","LIW_1201"]]
+
 queries = greg_data["query_id"].unique()
+
+# TODO: remove to create for all queries
+# queries = [:2]
+# greg_data = greg_data[greg_data["query_id"].isin(queries)]
 
 rounds = list(greg_data["round_no"].unique())
 if 1 in rounds: rounds.remove(1)
@@ -27,10 +51,10 @@ for q_id, df_group in tqdm(gb_df):
                 continue
             # if r == 2 and bot in ["NMABOT", "NMTBOT"]:
             #     continue
-            rows.append({"round_no": r, "query_id": q_id, "creator": creator,"username": bot, "text": ""})
+            rows.append({"round_no": r, "query_id": q_id, "creator": creator, "username": bot, "text": ""})
 
-final_df = pd.DataFrame(rows).sort_values(["round_no","query_id"], ascending=[False,True]).drop_duplicates()
-x = 1
+final_df = pd.DataFrame(rows).sort_values(["round_no", "query_id"], ascending=[False, True]).drop_duplicates()
+
 # try:
 #     text_df = pd.read_csv(f"bot_followup_{cp}.csv")
 #     df = pd.merge(df, text_df, how='inner', on=['round_no','query_id','creator','username']).drop('text_x', axis=1).rename(columns={'text_y':'text'})
@@ -56,9 +80,29 @@ x = 1
 #         columns={'text_y': 'text'})
 #     final_df.loc[final_df.username != 'BOT', 'text'] = merged_df['text']
 
-#TODO: testing, delete to use all queries
-queries = queries[:3]
-final_df = final_df[final_df.query_id.isin(queries)]
+# TODO: testing, delete to use all queries
+# Add prompts to csv
+final_df = final_df[final_df.query_id.isin(queries)].reset_index(drop=True)
+greg_data = pd.read_csv("greg_data.csv")
+
+for idx, row in tqdm(final_df.iterrows(), total=final_df.shape[0]):
+    messages = get_prompt(row.username, greg_data, row.creator, row.query_id)
+    content_list = [re.sub(r' {2,}', ' ', re.sub(r'\n{3,}', '\n\n', m["content"].replace("\\n", "\n"))) for m in
+                    messages]
+    messages_str = f"<s>[INST] <<SYS>>\n{content_list[0]}\n<</SYS>> [/INST]</s>"
+    for block in content_list[1:]:
+        messages_str += f"<s>[INST]\n{block}\n[/INST]</s>"
+    messages_str = re.sub(r' {2,}', ' ', re.sub(r'\n{3,}', '\n\n', messages_str.replace("\\n", "\n")))
+    messages_str = messages_str.rstrip().rstrip('</s>')
+    # pprint(messages_str)
+    # print("\n\n-------------------------------------------\n\n")
+    final_df.at[idx, "prompt"] = messages_str
+    # x = 1
+
+# with open(f"prompt_list_{cp}.txt", 'w') as f:
+#     f.writelines(final_df["prompt"].tolist())
+#     f.close()
 
 final_df.to_csv(f"bot_followup_{cp}.csv", index=False)
-print(final_df)
+print("final df queries: (", len(final_df.query_id.unique()), ")\n", final_df.query_id.unique())
+# divide_df(final_df, 4)

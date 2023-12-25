@@ -4,6 +4,16 @@ from config import current_prompt as cp, bot_cover_df
 import xml.etree.ElementTree as ET
 import warnings
 warnings.filterwarnings("ignore")
+import re
+
+print(f"########## running model {cp} ##########")
+
+if 'asrc' in cp:
+    bfu_df = pd.read_csv(f"bot_followup_{cp}.csv").rename({"username": "bot_name"}, axis=1)
+    bfu_df = bfu_df["bot_name"].drop_duplicates()
+    bot_cover_df = pd.DataFrame(data=bfu_df, index=bfu_df.index, columns=bot_cover_df.columns)
+
+    x=1
 
 
 def read_query_xml_to_dict(filename):
@@ -47,6 +57,9 @@ def create_query_xml(queries_dict, filename):
 
 
 texts = pd.read_csv(f"bot_followup_{cp}.csv").sort_values(['query_id', 'round_no']).dropna()
+texts = texts[['round_no', 'query_id', 'username', 'creator', 'text']]
+texts.text = texts.text.apply(lambda x: "   \n".join(re.split(r'(?<=[.!?])\s+', x)))
+
 # fix bot docno rounds
 for idx, row in texts[texts.creator != 'creator'].iterrows():
     texts.at[idx, 'round_no'] = row.round_no + 1
@@ -69,42 +82,16 @@ df["docno"] = df.apply(lambda row: "{}-{}-{}-{}".format('0' + str(row.round_no),
 df = df[df.round_no != 1]
 df = df.dropna().sort_values(['round_no', 'query_id', 'username']).reset_index(drop=True)
 df = pd.merge(df, bot_cover_df.reset_index()[["index","bot_name"]], left_on='username', right_on='bot_name', how='left').drop("bot_name", axis=1)
-x = 1
-# long_texts = []
-# short_texts = []
-# for idx, row in tqdm(df.iterrows()):
-#     if "BOT" not in str(row.username):
-#         continue
-#
-#     if len(row.text.split(' ')) < 140:
-#         # print("SHORT TEXT\n")
-#         # print(
-#         #     f"idx in file: {idx + 2}, id: {row.query_id}, topic: {names[row.query_id]}, creator: {row.creator}, username: {row.username}, length: {len(row.text.split(' '))}\n")
-#         short_texts.append(idx + 2)
-#
-#     if len(row.text.split(' ')) > 150:
-#         # print("LONG TEXT! CHANGE!\n")
-#         # print(
-#         #     f"idx in file: {idx + 2}, id: {row.query_id}, topic: {names[row.query_id]}, creator: {row.creator}, username: {row.username}, length: {len(row.text.split(' '))}\n")
-#         long_texts.append(idx + 2)
-#
-# print("long texts:", sorted(long_texts))
-# print("short texts:", sorted(short_texts))
-
-# create trectext format
-
-# create working set file
-# 201 Q0 ROUND-01-002-44 0 2.1307966709136963 summarizarion_task
-# 201 Q0 ROUND-01-002-14 0 -0.1451454907655716 summarizarion_task
-# 201 Q0 ROUND-01-002-29 0 -1.9667246341705322 summarizarion_task
-# 201 Q0 ROUND-01-002-13 0 -3.396240472793579 summarizarion_task
+# df = pd.merge(df, bot_cover_df["bot_name"], left_on='username', right_on='bot_name', how='left').drop("bot_name", axis=1)
 
 
 working_set_docnos = 0
-gb_df = df.groupby(["round_no", "query_id"])
+gb_df = df.reset_index().groupby(["round_no", "query_id"])
+# gb_df = df.groupby(["round_no", "query_id"])
 query_dict = read_query_xml_to_dict('/lv_local/home/niv.b/content_modification_code-master/data/queries_bot_modified_sorted_1.xml')
 new_query_dict = {}
 comp_dict = {}
+
 for group_name, df_group in tqdm(gb_df):
     creators = df_group[df_group.creator != "creator"].creator.unique()
     bots = df_group[df_group.creator != "creator"].username.unique()
@@ -113,8 +100,10 @@ for group_name, df_group in tqdm(gb_df):
         for bot in bots:
             comp_df = df_group[((df_group.username != creator) & (df_group.creator == "creator")) | (
                         (df_group.username == bot) & (df_group.creator == creator))]
-            ind = int(comp_df[comp_df.username == bot]["index"].iloc[0])
-            key = str(group_name[0]) + str(group_name[1]).rjust(3, '0') + str(creator).rjust(2, '0') + str(ind).rjust(3, '0')
+            if comp_df[comp_df.creator != 'creator'].shape[0] == 0:
+                continue
+            ind = int(bot_cover_df[bot_cover_df.bot_name == bot].index[0])
+            key = str(group_name[0]) + str(group_name[1]).rjust(3, '0') + str(creator).rjust(2, '0') + str(ind).rjust(4, '0')
             comp_df.loc[:, 'Key'] = key
             comp_dict[key] = comp_df
             new_query_dict[key] = query_dict[group_name[1]]
@@ -124,18 +113,18 @@ create_query_xml(new_query_dict, f'/lv_local/home/niv.b/content_modification_cod
 result = pd.concat(comp_dict.values(), axis=0)
 
 with open(f"working_set_{cp}.trectext", "w") as f:
-    for idx, row in result.sort_values("Key").iterrows():
+    for idx, row in result.sort_values(["Key","creator"], ascending=(True,True)).iterrows():
         f.write(f"{row.Key} Q0 {row.docno} 0 1.0 summarizarion_task\n")
         working_set_docnos += 1
 
 bot_followup_docnos = 0
 with open(f"bot_followup_{cp}.trectext", "w") as f:
     f.write(f"<DATA>\n")
-    for idx, row in df.iterrows():
+    for idx, row in df.sort_values(['query_id','docno'], ascending = [True,False]).iterrows():
         f.write(f"<DOC>\n")
         f.write(f"<DOCNO>{row.docno}</DOCNO>\n")
         f.write(f"<TEXT>\n")
-        f.write(f"{row.text}\n")
+        f.write(f"{row.text.strip()}\n")
         f.write(f"</TEXT>\n")
         f.write(f"</DOC>\n")
         bot_followup_docnos += 1
