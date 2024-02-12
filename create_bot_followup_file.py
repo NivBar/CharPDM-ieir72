@@ -5,7 +5,9 @@ from pprint import pprint
 import pandas as pd
 from itertools import product
 from tqdm import tqdm
-from config import current_prompt as cp, ACTIVE_BOTS, get_prompt
+
+import config
+from config import current_prompt as cp, ACTIVE_BOTS, get_prompt, temperatures, get_current_doc
 
 
 def prepare_directory(dir_path):
@@ -19,7 +21,7 @@ def divide_df(df, n):
     df_len = len(df)
     dfs = [df[i * df_len // n:(i + 1) * df_len // n] for i in range(n)]
     for i in range(n):
-        dfs[i].to_csv(f'bot_followup_{cp}/part_{i+1}.csv', index=False)
+        dfs[i].to_csv(f'bot_followup_{cp}/part_{i + 1}.csv', index=False)
     print("division of df to", n, "parts completed")
 
 
@@ -28,8 +30,8 @@ greg_data = greg_data[
     (greg_data.round_no == 7) & (greg_data.position.between(2, 5))]  # TODO: test setting from the article
 bots = ACTIVE_BOTS  # bots using prompt bank
 
-# TODO: only include in testing!
-bots = [bot for bot in bots if bot in ["DYN_1100T2", "DYN_1201R2","PAW_1301R","PAW_1210T","POW_1300","LIW_1201"]]
+# # TODO: only include in testing!
+# bots = [bot for bot in bots if bot in ["DYN_1100T2", "DYN_1201R2","PAW_1301R","PAW_1210T","POW_1300","LIW_1201"]]
 
 queries = greg_data["query_id"].unique()
 
@@ -85,24 +87,50 @@ final_df = pd.DataFrame(rows).sort_values(["round_no", "query_id"], ascending=[F
 final_df = final_df[final_df.query_id.isin(queries)].reset_index(drop=True)
 greg_data = pd.read_csv("greg_data.csv")
 
+
 for idx, row in tqdm(final_df.iterrows(), total=final_df.shape[0]):
-    messages = get_prompt(row.username, greg_data, row.creator, row.query_id)
-    content_list = [re.sub(r' {2,}', ' ', re.sub(r'\n{3,}', '\n\n', m["content"].replace("\\n", "\n"))) for m in
-                    messages]
-    messages_str = f"<s>[INST] <<SYS>>\n{content_list[0]}\n<</SYS>> [/INST]</s>"
-    for block in content_list[1:]:
-        messages_str += f"<s>[INST]\n{block}\n[/INST]</s>"
-    messages_str = re.sub(r' {2,}', ' ', re.sub(r'\n{3,}', '\n\n', messages_str.replace("\\n", "\n")))
-    messages_str = messages_str.rstrip().rstrip('</s>')
-    # pprint(messages_str)
-    # print("\n\n-------------------------------------------\n\n")
-    final_df.at[idx, "prompt"] = messages_str
+    if not config.using_gpt:
+
+        messages = get_prompt(row.username, greg_data, row.creator, row.query_id)
+        content_list = [re.sub(r' {2,}', ' ', re.sub(r'\n{3,}', '\n\n', m["content"].replace("\\n", "\n"))) for m in
+                        messages]
+        # messages_str = f"<s>[INST] <<SYS>>\n{content_list[0]}\n<</SYS>> [/INST]</s>"
+        messages_str = f"<s>[INST] <<SYS>>\n{content_list[0]}\n<</SYS>> \n\nContext: [/INST]</s>"
+
+        for block in content_list[1:]:
+            messages_str += f"<s>[INST]\n{block}\n[/INST]</s>"
+        messages_str = re.sub(r' {2,}', ' ', re.sub(r'\n{3,}', '\n\n', messages_str.replace("\\n", "\n")))
+        messages_str = messages_str.rstrip().rstrip('</s>')
+        # pprint(messages_str)
+        # print("\n\n-------------------------------------------\n\n")
+        # messages_str = messages_str[:messages_str.find("Context") + len("Context")] + \
+        #                messages_str[messages_str.find("Context") + len("Context"):].replace("\n[/INST]</s><s>[INST]\n", "", 1) \
+        #     if "Context" in messages_str and messages_str[messages_str.find("Context"):].count(
+        #     "[/INST]</s><s>[INST]") > 0 else messages_str
+
+        messages_str = messages_str.replace("[/INST]</s><s>[INST]","")
+
+        messages_str = messages_str.rsplit("[/INST]", 1)[
+                              0] + "\n\n---\nEdited Document:\n[/INST]" if "[/INST]" in messages_str else messages_str
+        messages_str = re.sub(r'\n{3,}', '\n\n', messages_str)
+
+        final_df.at[idx, "prompt"] = messages_str
+
+    ref_doc = get_current_doc(greg_data, row.creator, row.query_id)
+    final_df.at[idx, "ref_doc"] = ref_doc
     # x = 1
 
 # with open(f"prompt_list_{cp}.txt", 'w') as f:
 #     f.writelines(final_df["prompt"].tolist())
 #     f.close()
+dfs = []
+for temp in temperatures:
+    final_df["temp"] = temp
+    dfs.append(final_df.copy())
+    if not config.using_gpt:
+        final_df.to_csv(f"./bot_followups/part_{temperatures.index(temp) + 1}.csv", index=False)
 
+final_df = pd.concat(dfs, ignore_index=True)
 final_df.to_csv(f"bot_followup_{cp}.csv", index=False)
-print("final df queries: (", len(final_df.query_id.unique()), ")\n", final_df.query_id.unique())
+# print("final df queries: (", len(final_df.query_id.unique()), ")\n", final_df.query_id.unique())
 # divide_df(final_df, 4)

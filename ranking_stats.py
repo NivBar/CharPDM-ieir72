@@ -12,8 +12,6 @@ from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
 
-
-
 if not os.path.exists(f"feature_data_{cp}.csv"):
     print("Part 1 started")
     file_path = f'/lv_local/home/niv.b/content_modification_code-master/Results/RankedLists/LambdaMART{cp}'
@@ -33,7 +31,7 @@ if not os.path.exists(f"feature_data_{cp}.csv"):
 
     df = pd.DataFrame(data, columns=columns).drop(["Q0", "method"], axis=1)
 
-    #### Features preprocess ####
+    ### Features preprocess ####
     folder_path = f'/lv_local/home/niv.b/content_modification_code-master/Results/Features/{cp}'
 
     # Iterate over files in the folder
@@ -52,8 +50,11 @@ if not os.path.exists(f"feature_data_{cp}.csv"):
                     docno, score = values
                     df.loc[df['docno'] == docno, feat] = score
                 except:
-                    docno, sum_, min_, max_, mean_, var_ = values
-                    df.loc[df['docno'] == docno, feat] = mean_
+                    try:
+                        docno, sum_, min_, max_, mean_, var_ = values
+                        df.loc[df['docno'] == docno, feat] = mean_
+                    except:
+                        x = 1
 
     df.to_csv(f"feature_data_{cp}.csv", index=False)
     print("Part 1 ended")
@@ -119,6 +120,7 @@ if not os.path.exists(f"feature_data_{cp}_new.csv"):
 
             # Set the 'previous_docno' and 'previous_pos' for the current row based on the found 'previous_docno'
             df.loc[idx, "previous_docno"] = prev_docno
+            df.loc[idx, "previous_docno_str"] = df.iloc[prev_docno]['docno']
             df.loc[idx, "previous_pos"] = df[df.index == prev_docno].original_position.values[0]
         except:
             continue
@@ -156,82 +158,21 @@ if not os.path.exists(f"feature_data_{cp}_new.csv"):
 
     # df.loc[df.creator == 'creator', 'current_pos'] = df.loc[df.creator == 'creator', "original_position"]
 
-    df['pos_diff'] = df.apply(
-        lambda row: row['current_pos'] - row['previous_pos'] if pd.notna(row['current_pos']) and pd.notna(
-            row['previous_pos']) else np.nan, axis=1)
-
-    df['scaled_pos_diff'] = np.where(pd.isna(df['pos_diff']), np.nan,
-                                     np.where(df['pos_diff'] > 0, df['pos_diff'] / (5 - df['previous_pos']),
-                                              df['pos_diff'] / (df['previous_pos'] - 1)))
-    df['scaled_pos_diff'] = np.where(pd.notna(df['scaled_pos_diff']), df['scaled_pos_diff'],
-                                     np.where(df['pos_diff'] == 0, 0,
-                                              np.nan))
-    # addition
-
-    # df['BOT_pos_diff'] = df.apply(
-    #     lambda row: row['BOT_current_pos'] - row['BOT_previous_pos'] if pd.notna(row['BOT_current_pos']) and pd.notna(
-    #         row['BOT_previous_pos']) else np.nan, axis=1)
-    #
-    # df['BOT_scaled_pos_diff'] = np.where(pd.isna(df['BOT_pos_diff']), np.nan,
-    #                                  np.where(df['BOT_pos_diff'] > 0, df['BOT_pos_diff'] / (5 - df['BOT_previous_pos']),
-    #                                           df['BOT_pos_diff'] / (df['BOT_previous_pos'] - 1)))
-    # df['BOT_scaled_pos_diff'] = np.where(pd.notna(df['BOT_scaled_pos_diff']), df['BOT_scaled_pos_diff'],
-    #                                  np.where(df['BOT_pos_diff'] == 0, 0,
-    #                                           np.nan))
-    # addition
-
-    # # Resetting the index of the DataFrame
-    # df.reset_index(inplace=True)
-
-    # Updating the 'original_position' column based on the 'previous_docno'
-    # df["original_position"] = df.apply(
-    #     lambda row: df[df.docno == row.docno.replace(row.creator, 'creator').replace(row.username,
-    #                                                                                  row.creator)].original_position.values[
-    #         0] if pd.isna(row.original_position) and not
-    #     df[df.docno == row.docno.replace(row.creator, 'creator').replace(row.username,
-    #                                                                      row.creator)].empty else row.original_position,
-    #     axis=1)
-
-    # TODO: pay attention to this line
-    # df.loc[df.original_position.isna(), 'original_position'] = df[df.original_position.isna()].apply(
-    #     lambda row: df.loc[df.docno == row.docno.replace('-BOT', '-creator').replace(row.username,
-    #                                                                                  row.creator), 'original_position'].values[
-    #         0], axis=1)
-
-    # def fill_original_position(row):
-    #     target_docno = row.docno.replace(row.username, row.creator)
-    #     target_values = df.loc[df.docno == target_docno, 'original_position'].values
-
-    # if len(target_values) == 0:
-    #     print(f"No match found for docno: {target_docno}")
-    #     return np.nan  # or some other value that makes sense in your context
-    #
-    # return target_values[0]
-
-    # df.loc[df.original_position.isna(), 'original_position'] = df[df.original_position.isna()].apply(fill_original_position,
-    #                                                                                                  axis=1)
-
-    # df.loc[df.creator == 'BOT', 'win_over_BOT'] = np.where(df[df.creator == 'BOT']['current_pos'] - df[df.creator == 'BOT']['original_position'] <= 0, True, False)
+    df['pos_diff'] = df.apply(lambda row: max(int(row['current_pos'] - row['previous_pos']) * -1, 0) if pd.notna(
+        row['current_pos']) and pd.notna(row['previous_pos']) else np.nan, axis=1)
+    df['scaled_pos_diff'] = df.apply(
+        lambda row: row['pos_diff'] / (row['previous_pos'] - 1) if pd.notna(row['previous_pos']) and row[
+            'previous_pos'] != 1 else np.nan, axis=1)
 
     # Calculating 'scaled_orig_pos_diff' based on 'orig_pos_diff', considering some conditions
     df['orig_pos_diff'] = df.apply(
-        lambda row: row['current_pos'] - row['original_position'] if pd.notna(row['current_pos']) and pd.notna(
-            row['original_position']) else np.nan, axis=1)
+        lambda row: max(int(row['current_pos'] - row['original_position']) * -1, 0) if pd.notna(
+            row['current_pos']) and pd.notna(row['original_position']) else np.nan, axis=1)
 
-    df['scaled_orig_pos_diff'] = np.where(pd.isna(df['orig_pos_diff']), np.nan,
-                                          np.where(df['orig_pos_diff'] > 0,
-                                                   df['orig_pos_diff'] / (5 - df['original_position']),
-                                                   df['orig_pos_diff'] / (df['original_position'] - 1)))
+    df['scaled_orig_pos_diff'] = df.apply(
+        lambda row: row['orig_pos_diff'] / (row['original_position'] - 1) if pd.notna(row['original_position']) and row[
+            'original_position'] != 1 else np.nan, axis=1)
 
-    df['scaled_orig_pos_diff'] = np.where(pd.isna(df['scaled_orig_pos_diff']),
-                                          np.where(df['orig_pos_diff'] == 0, 0, np.nan),
-                                          df['scaled_orig_pos_diff'])
-
-    # df['scaled_orig_pos_diff'] = np.where(pd.notna(df['scaled_orig_pos_diff']), df['scaled_pos_diff'],
-    #                                       np.where(df['orig_pos_diff'] == 0, 0,
-    #                                                np.nan))
-
-    # Save the final DataFrame to a new CSV file "feature_data_4_new.csv"
     df = df[df.round_no != 1]
     df = df[df.score.notna()]
 
@@ -240,6 +181,7 @@ if not os.path.exists(f"feature_data_{cp}_new.csv"):
 
     df.to_csv(f"feature_data_{cp}_new.csv", index=False)
     print("Part 2 ended")
+    exit()
 
 
 #### calculate smilarity ####
@@ -292,7 +234,7 @@ def process_row(row, vectorizer):
 
     try:
         llama_similarity_prev = calculate_cosine_similarity(get_llama2_embeddings(row['text']),
-                                                        get_llama2_embeddings(prev_txt))
+                                                            get_llama2_embeddings(prev_txt))
     except Exception as e:
         print("ERROR!\n", e)
         x = 1
@@ -308,8 +250,6 @@ def process_row(row, vectorizer):
     tfidf_similarity_prev = calculate_cosine_similarity(get_tfidf_embeddings(vectorizer, [row['text']]),
                                                         get_tfidf_embeddings(vectorizer, [prev_txt]))
     # print("Previous TF-IDF similarity: ", tfidf_similarity_prev)
-
-
 
     return row.name, bert_similarity_prev, tfidf_similarity_prev, llama_similarity_prev
 

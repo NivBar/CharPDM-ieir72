@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from config import current_prompt as cp, bot_cover_df
@@ -11,7 +12,8 @@ print(f"########## running model {cp} ##########")
 if 'asrc' in cp:
     bfu_df = pd.read_csv(f"bot_followup_{cp}.csv").rename({"username": "bot_name"}, axis=1)
     bfu_df = bfu_df["bot_name"].drop_duplicates()
-    bot_cover_df = pd.DataFrame(data=bfu_df, index=bfu_df.index, columns=bot_cover_df.columns)
+    # bot_cover_df = pd.DataFrame(data=bfu_df, index=bfu_df.index, columns=bot_cover_df.columns)
+    bot_cover_df = pd.DataFrame(data=bfu_df, index=bfu_df.index, columns=bot_cover_df.columns).iloc[0].T
 
     x=1
 
@@ -57,8 +59,28 @@ def create_query_xml(queries_dict, filename):
 
 
 texts = pd.read_csv(f"bot_followup_{cp}.csv").sort_values(['query_id', 'round_no']).dropna()
-texts = texts[['round_no', 'query_id', 'username', 'creator', 'text']]
+if 'temp' in texts.columns:
+    texts =texts[['round_no', 'query_id', 'username', 'creator', 'text','temp']]
+elif 'creator_orig' in texts.columns:
+    texts = texts[['round_no', 'query_id', 'username', 'creator', 'text','creator_orig']]
+else:
+    texts = texts[['round_no', 'query_id', 'username', 'creator', 'text']]
 texts.text = texts.text.apply(lambda x: "   \n".join(re.split(r'(?<=[.!?])\s+', x)))
+
+# add temp
+if 'temp' in texts.columns:
+    # Create a mask for rows where 'creator' is not 'creator'
+    mask = texts['creator'] != 'creator'
+
+    # Convert 'temp' to string in the desired format, handling NaN values
+    texts['temp_str'] = texts['temp'].apply(lambda x: "{:02d}".format(int(x * 10)) if pd.notna(x) else np.nan)
+
+    # Update the 'username' column based on the condition
+    # Ensure both columns are treated as strings and concatenate
+    # Only update rows where temp is not NaN
+    mask &= texts['temp_str'].notna()
+    texts.loc[mask, 'username'] = texts.loc[mask, 'username'].astype(str) + "@" + texts.loc[mask, 'temp_str']
+    texts.drop(['temp','temp_str'], axis=1, inplace=True)
 
 # fix bot docno rounds
 for idx, row in texts[texts.creator != 'creator'].iterrows():
@@ -68,22 +90,31 @@ rounds = texts.round_no.unique()
 greg_data = pd.read_csv("greg_data.csv").rename({"current_document": "text"}, axis=1)
 greg_data["creator"] = "creator"
 names = greg_data[["query_id", "query"]].set_index('query_id').to_dict()['query']
-greg_data = greg_data[texts.columns]
+greg_data = greg_data[[col for col in texts.columns if col in greg_data.columns]]
 greg_data = greg_data[greg_data.round_no.isin(rounds)]
 
 # asrc_df = pd.read_csv("bot_followup_asrc.csv")
 # df = pd.concat([greg_data, texts, asrc_df])
 df = pd.concat([greg_data, texts]).sort_values(['round_no', 'query_id'])
 # df = df[df.round_no.isin(rounds_comp)]
-df["docno"] = df.apply(lambda row: "{}-{}-{}-{}".format('0' + str(row.round_no),
+
+if 'creator_orig' in df.columns:
+    df["docno"] = df.apply(lambda row: "{}-{}-{}-{}".format('0' + str(row.round_no),
+                                                            '0' + str(row.query_id) if row.query_id < 100 else str(
+                                                                row.query_id), row.username, row.creator_orig).replace(".0",""), axis=1)
+else:
+    df["docno"] = df.apply(lambda row: "{}-{}-{}-{}".format('0' + str(row.round_no),
                                                         '0' + str(row.query_id) if row.query_id < 100 else str(
                                                             row.query_id), row.username, row.creator), axis=1)
 
 df = df[df.round_no != 1]
 df = df.dropna().sort_values(['round_no', 'query_id', 'username']).reset_index(drop=True)
-df = pd.merge(df, bot_cover_df.reset_index()[["index","bot_name"]], left_on='username', right_on='bot_name', how='left').drop("bot_name", axis=1)
-# df = pd.merge(df, bot_cover_df["bot_name"], left_on='username', right_on='bot_name', how='left').drop("bot_name", axis=1)
+try:
+    df = pd.merge(df, bot_cover_df.reset_index()[["index","bot_name"]], left_on='username', right_on='bot_name', how='left').drop("bot_name", axis=1)
+except:
+    df = pd.merge(df, bot_cover_df.to_frame().T.reset_index()[["index","bot_name"]], left_on='username', right_on='bot_name', how='left').drop("bot_name", axis=1)
 
+# df = pd.merge(df, bot_cover_df["bot_name"], left_on='username', right_on='bot_name', how='left').drop("bot_name", axis=1)
 
 working_set_docnos = 0
 gb_df = df.reset_index().groupby(["round_no", "query_id"])
@@ -95,16 +126,26 @@ comp_dict = {}
 for group_name, df_group in tqdm(gb_df):
     creators = df_group[df_group.creator != "creator"].creator.unique()
     bots = df_group[df_group.creator != "creator"].username.unique()
-
     for creator in creators:
         for bot in bots:
             comp_df = df_group[((df_group.username != creator) & (df_group.creator == "creator")) | (
                         (df_group.username == bot) & (df_group.creator == creator))]
             if comp_df[comp_df.creator != 'creator'].shape[0] == 0:
                 continue
-            ind = int(bot_cover_df[bot_cover_df.bot_name == bot].index[0])
+            try:
+                ind = int(bot_cover_df[bot_cover_df.bot_name == bot].index[0])
+            #DROP!
+            except:
+                ind = 0
             key = str(group_name[0]) + str(group_name[1]).rjust(3, '0') + str(creator).rjust(2, '0') + str(ind).rjust(4, '0')
             comp_df.loc[:, 'Key'] = key
+            #DROP
+            if 'creator_orig' in comp_df.columns:
+                comp_df.loc[:, 'creator'] = comp_df.creator_orig.astype(int).astype(str)
+                comp_df.drop('creator_orig', axis=1, inplace=True)
+                comp_df.drop('level_0', axis=1, inplace=True)
+                comp_df = comp_df[comp_df.username == 'ref']
+
             comp_dict[key] = comp_df
             new_query_dict[key] = query_dict[group_name[1]]
 
