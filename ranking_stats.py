@@ -63,6 +63,7 @@ if not os.path.exists(f"feature_data_{cp}.csv"):
 if not os.path.exists(f"feature_data_{cp}_new.csv"):
     print("Part 2 started")
     df = pd.read_csv(f"feature_data_{cp}.csv").rename({"query_id": "query_id_new"}, axis=1)
+    df = df[[col for col in df.columns if not col.startswith("doc")] + ['docno']]
     df.query_id_new = df.query_id_new.astype(int)
     # df = pd.read_csv(f"feature_data_{cp}.csv").drop("rank", axis=1)
 

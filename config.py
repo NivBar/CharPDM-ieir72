@@ -12,11 +12,16 @@ from API_key import API_key
 
 stop_words = set(stopwords.words('english'))
 
-current_prompt = "test@F02"
+current_prompt = "test@F100"
+# GPT!!!
 using_gpt = True
+temperature = 1.0
+
 ACTIVE_BOTS = ["DYN_1100T2", "POW_1300", "PAW_1301R", "DYN_1201R2", "PAW_1210T", "LIW_1201"]
+
+# ACTIVE_BOTS = ["LIW_1201"]
 # temperatures = [0.0, 0.2, 0.5]
-temperatures = [0.2]
+temperatures = [temperature]
 bot_cover_df = pd.read_csv("final_options.csv").sort_values(["doc_no", "bot_name"], ascending=True)
 
 bot_cover_df = bot_cover_df[bot_cover_df.bot_name.isin(ACTIVE_BOTS)]
@@ -26,7 +31,7 @@ new_rows = []
 for (index, row), temp in cartesian_product:
     new_row = row.to_dict()
     new_row['temp'] = temp
-    formatted_temp = "{:02d}".format(int(temp * 10))
+    formatted_temp = str(int(temp*100))
     new_row['bot_name'] = new_row['bot_name'] + "@" + formatted_temp
     new_rows.append(new_row)
 
@@ -60,9 +65,8 @@ text. High presence_penalty values (e.g., 2.0 or higher) can promote the generat
 values (e.g., 0.5 or lower) can produce more repetitive and redundant outputs.
 """
 model = "gpt-4"
-temperature = 0.2
+max_tokens = 165
 top_p = 0.3
-max_tokens = 250
 frequency_penalty = 1.0
 presence_penalty = 0.0
 
@@ -141,14 +145,17 @@ def get_prompt(bot_name, data, creator_name, query_id):
 
     message = [
         {"role": "system",
-         #ONE SENTENCE
+         # ONE SENTENCE
          # "content": """Edit the candidate document by changing only one sentence, leaving the rest unchanged, to improve its search engine ranking for the candidate query. Aim for the highest rank (1 being the highest). Choose the sentence you believe editing will be most beneficial for this cause and edit it using the black box search engine's past rankings over various queries given as context by the user for guidance. This edit should make the edited document very similar to the candidate, having the same number of sentences and the same or higher amount of words in it. Generate only the edited document, without any additional comments or titles.""".replace("\n","")}]
 
-         #TWO SENTENCES
+         # TWO SENTENCES
          # "content": """Edit the candidate document by changing only two sentences, leaving the rest unchanged, to improve its search engine ranking for the candidate query. Aim for the highest rank (1 being the highest). Choose the sentences you believe editing will be most beneficial for this cause and edit them using the black box search engine's past rankings over various queries given as context by the user for guidance. This edit should make the edited document very similar to the candidate, having the same number of sentences and the same or higher amount of words in it. Generate only the edited document, without any additional comments or titles.""".replace("\n", "")}]
 
-        #THREE SENTENCES
-        "content": """Edit the candidate document to improve its search engine ranking for the candidate query. Aim for the highest rank (1 being the highest). Choose the sentences you believe editing will be most beneficial for this cause and edit them using the black box search engine's past rankings over various queries given as context by the user for guidance. This edit should make the edited document very similar to the candidate, having the same number of sentences and the same or higher amount of words in it. Generate only the edited document, without any additional comments or titles.""".replace("\n", "")}]
+         # ALL DOCUMENT
+         # "content": """Edit the candidate document to improve its search engine ranking for the candidate query. Aim for the highest rank (1 being the highest). Choose the sentences you believe editing will be most beneficial for this cause and edit them using the black box search engine's past rankings over various queries given as context by the user for guidance. This edit should make the edited document very similar to the candidate, having the same number of sentences and the same or higher amount of words in it. Generate only the edited document, without any additional comments or titles.""".replace("\n", "")}]
+         "content": """Edit the candidate document to improve its search engine ranking for the candidate query, aiming for the highest rank (1 being the highest). Use the black box search engine's past rankings over various queries, provided as context by the user, to guide your edits. Focus on editing the most impactful sentences to enhance ranking potential. Target an edited document length of around 102 words, not exceeding 150 words. Ensure the edited document is very similar to the candidate document. Generate only the edited document, without additional comments or titles.""".replace(
+             "\n", "")}]
+
     if bot_info["cand_inc"]:
         message.append({"role": "user",
                         "content": fr"\n\nInput:\n\n- Candidate Query: {recent_data.iloc[0]['query']}\n\n- Candidate Document: {current_doc}\n\n- {epoch_phrasing[epoch]} Ranking: {current_rank}"})
@@ -479,20 +486,40 @@ def get_prompt(bot_name, data, creator_name, query_id):
     # pprint(message)
     return message
 
-
-# # print demo prompt list
-if __name__ == '__main__':
-    data = pd.read_csv("sandbox_data.csv")
-    # bot_names = ["POW_2211", "POW_2201", "POW_2210", "POW_2200",
-    #              "PAW_2211T", "PAW_2201T", "PAW_2210T", "PAW_2200T", "PAW_2211R", "PAW_2201R", "PAW_2210R", "PAW_2200R",
-    #              "LIW_2211", "LIW_2201", "LIW_2210", "LIW_2200",
-    #              "DYN_2211T2", "DYN_2201T2", "DYN_2210T2", "DYN_2200T2", "DYN_2211R2", "DYN_2201R2", "DYN_2210R2",
-    #              "DYN_2200R2"]
-    bot_names = ["DYN_1100T2"]  # , "POW_1300", "PAW_1301R", "DYN_1201R2", "PAW_1210T", "LIW_1201"]
-    for bname in bot_names:
-        print("bot name: ", bname)
-        res = get_prompt(bname, data, 51, 195)
-        res = [{k: v.replace("\\n", "\n") for k, v in x.items()} for x in res]
-
-        pprint(res)
-        print("\n\n#########################################################\n\n")
+# # # print demo prompt list
+# if __name__ == '__main__':
+#     data = pd.read_csv("sandbox_data.csv")
+#     # bot_names = ["POW_2211", "POW_2201", "POW_2210", "POW_2200",
+#     #              "PAW_2211T", "PAW_2201T", "PAW_2210T", "PAW_2200T", "PAW_2211R", "PAW_2201R", "PAW_2210R", "PAW_2200R",
+#     #              "LIW_2211", "LIW_2201", "LIW_2210", "LIW_2200",
+#     #              "DYN_2211T2", "DYN_2201T2", "DYN_2210T2", "DYN_2200T2", "DYN_2211R2", "DYN_2201R2", "DYN_2210R2",
+#     #              "DYN_2200R2"]
+#
+#     replacement_dict = {
+#         'DYN_1100T2': 'dynamic_tops',
+#         'POW_1300': 'pointwise',
+#         'DYN_1201R2': 'dynamic_random',
+#         'PAW_1210T': 'pairwise_tops',
+#         'PAW_1301R': 'pairwise_random',
+#         'LIW_1201': 'listwise',
+#         'LMBOT1': 'LambdaMART_baseline'
+#     }
+#
+#     bot_names = ["DYN_1100T2" , "POW_1300", "PAW_1301R", "DYN_1201R2", "PAW_1210T", "LIW_1201"]
+#
+#     bot_cover_df = pd.read_csv("final_options.csv").sort_values(["doc_no", "bot_name"], ascending=True)
+#     bot_cover_df = bot_cover_df[bot_cover_df.bot_name.isin(bot_names)]
+#     bot_cover_df["bot_group"] = bot_cover_df["bot_name"].apply(lambda x: replacement_dict[x])
+#     bot_cover_df = bot_cover_df.sort_values("bot_group")[["bot_group"] + [x for x in bot_cover_df.columns if x != "bot_group"]]
+#
+#     bot_cover_df.to_csv("current_sandbox_bots.csv", index=False)
+#
+#     print("*** using query_id: 51, username: 195 ranking 2nd in previous rank for query ***\n\n")
+#     for bname in bot_names:
+#         print("bot name: ", replacement_dict[bname], ", formal nickname: ", bname, "\n\n")
+#
+#         res = get_prompt(bname, data, 51, 195)
+#         res = [{k: v.replace("\\n", "\n") for k, v in x.items()} for x in res]
+#
+#         pprint(res)
+#         print("\n\n#########################################################\n\n")

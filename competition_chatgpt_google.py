@@ -38,7 +38,7 @@ def remove_sentences_second(sentences):
     # Calculate the initial total number of words
     total_words = sum(len(sentence.split()) for sentence in sentences)
 
-    # Check if total_words is already within the desired range or below 140
+    # Check if total_words is already within the desired range or below 120
     if total_words <= 150:
         return sentences
 
@@ -52,7 +52,7 @@ def remove_sentences_second(sentences):
                 sentences.remove(sentence)
                 return sentences
 
-        # Remove the shortest sentence if no sentence can be removed to meet the desired range or below 140
+        # Remove the shortest sentence if no sentence can be removed to meet the desired range or below 120
         if total_words > 150:
             shortest_sentence = min(sentences, key=lambda sentence: len(sentence))
             sentences.remove(shortest_sentence)
@@ -82,7 +82,7 @@ def count_words_complete_sentences(text):
             truncated_text = ' '.join(sentences)
             word_count = sum(len(sentence.split()) for sentence in sentences)
 
-        if word_count < 140:
+        if word_count < 120:
             # second try (less preferred)
             word_count_second = sum(len(sentence.split()) for sentence in sentences_second)
             sentences_second = remove_sentences_second(sentences_second)
@@ -90,13 +90,13 @@ def count_words_complete_sentences(text):
             word_count_second_new = sum(len(sentence.split()) for sentence in sentences_second)
             print(f"second try initiated, word counts - orig: {word_count_second}, new: {word_count_second_new}")
 
-            if word_count_second_new >= 140 and word_count_second_new <= 150:
+            if word_count_second_new >= 120 and word_count_second_new <= 150:
                 return word_count_second_new, truncated_text_second + "." if truncated_text_second[
                                                                                  -1] != "." else truncated_text_second, True
-            if word_count < 140:
+            if word_count < 120:
                 return len(text.split()), text, False
 
-        if word_count >= 140 and word_count <= 150:
+        if word_count >= 120 and word_count <= 150:
             return word_count, truncated_text + "." if truncated_text[-1] != "." else truncated_text, True
 
     # All sentences are complete
@@ -144,7 +144,7 @@ def get_comp_text(messages, temperature=config.temperature, top_p=config.top_p,
             #     res = " ".join(res.split()[:148]) + "."
             #     counter = 0
             #     break
-            # if word_no < 140 or word_no > 150:
+            # if word_no < 120 or word_no > 150:
             #     max_tokens += 10
             #     response = False
             #     print(f"word no was: {word_no}, increasing max tokens to: {max_tokens}.")
