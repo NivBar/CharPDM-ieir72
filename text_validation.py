@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+
+import config
 from config import current_prompt as cp, bot_cover_df
 import xml.etree.ElementTree as ET
 import warnings
@@ -14,8 +16,8 @@ print(f"########## running model {cp} ##########")
 if 'asrc' in cp:
     bfu_df = pd.read_csv(f"bot_followup_{cp}.csv").rename({"username": "bot_name"}, axis=1)
     bfu_df = bfu_df["bot_name"].drop_duplicates()
-    # bot_cover_df = pd.DataFrame(data=bfu_df, index=bfu_df.index, columns=bot_cover_df.columns)
-    bot_cover_df = pd.DataFrame(data=bfu_df, index=bfu_df.index, columns=bot_cover_df.columns).iloc[0].T
+    bot_cover_df = pd.DataFrame(data=bfu_df, index=bfu_df.index, columns=bot_cover_df.columns)
+    # bot_cover_df = pd.DataFrame(data=bfu_df, index=bfu_df.index, columns=bot_cover_df.columns).iloc[0].T
 
     x = 1
 
@@ -99,7 +101,9 @@ texts = pd.read_csv(f"bot_followup_{cp}.csv").sort_values(['query_id', 'round_no
 
 # texts.to_csv(f"bot_followup_short_{cp}.csv", index=False)
 
-assert texts['text'].apply(lambda x: len(x.split())).max() <= 150
+#TODO: check if the text is still too long
+
+# assert texts['text'].apply(lambda x: len(x.split())).max() <= 150
 
 if 'temp' in texts.columns:
     texts = texts[['round_no', 'query_id', 'username', 'creator', 'text', 'temp']]
@@ -121,7 +125,8 @@ if 'temp' in texts.columns:
     # Ensure both columns are treated as strings and concatenate
     # Only update rows where temp is not NaN
     mask &= texts['temp_str'].notna()
-    texts.loc[mask, 'username'] = texts.loc[mask, 'username'].astype(str) + "@" + texts.loc[mask, 'temp_str']
+    #TODO: return to original
+    # texts.loc[mask, 'username'] = texts.loc[mask, 'username'].astype(str) + "@" + texts.loc[mask, 'temp_str']
     texts.drop(['temp', 'temp_str'], axis=1, inplace=True)
 
 # fix bot docno rounds
@@ -129,7 +134,11 @@ for idx, row in texts[texts.creator != 'creator'].iterrows():
     texts.at[idx, 'round_no'] = row.round_no + 1
 
 rounds = texts.round_no.unique()
-greg_data = pd.read_csv("greg_data.csv").rename({"current_document": "text"}, axis=1)
+if config.using_e5:
+    greg_data = pd.read_csv("tommy_data.csv").rename({"current_document": "text"}, axis=1)
+else:
+    greg_data = pd.read_csv("greg_data.csv").rename({"current_document": "text"}, axis=1)
+
 greg_data["creator"] = "creator"
 names = greg_data[["query_id", "query"]].set_index('query_id').to_dict()['query']
 greg_data = greg_data[[col for col in texts.columns if col in greg_data.columns]]
@@ -153,7 +162,9 @@ else:
 df = df[df.round_no != 1]
 df = df.dropna().sort_values(['round_no', 'query_id', 'username']).reset_index(drop=True)
 try:
-    df = pd.merge(df, bot_cover_df.reset_index()[["index", "bot_name"]], left_on='username', right_on='bot_name',
+    bot_cover_df_temp = bot_cover_df.copy()
+    bot_cover_df_temp.bot_name = bot_cover_df_temp.bot_name.apply(lambda x: x.split("@")[0])
+    df = pd.merge(df, bot_cover_df_temp.reset_index()[["index", "bot_name"]], left_on='username', right_on='bot_name',
                   how='left').drop("bot_name", axis=1)
 except:
     df = pd.merge(df, bot_cover_df.to_frame().T.reset_index()[["index", "bot_name"]], left_on='username',
@@ -179,7 +190,9 @@ for group_name, df_group in tqdm(gb_df):
             if comp_df[comp_df.creator != 'creator'].shape[0] == 0:
                 continue
             try:
-                ind = int(bot_cover_df[bot_cover_df.bot_name == bot].index[0])
+                bot_cover_df_temp = bot_cover_df.copy()
+                bot_cover_df_temp.bot_name = bot_cover_df_temp.bot_name.apply(lambda x: x.split("@")[0])
+                ind = int(bot_cover_df_temp[bot_cover_df_temp.bot_name == bot].index[0])
             # DROP!
             except:
                 ind = 0

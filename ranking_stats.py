@@ -1,4 +1,6 @@
 import os
+
+import config
 from config import current_prompt as cp
 import warnings
 from sklearn.metrics.pairwise import cosine_similarity
@@ -64,7 +66,10 @@ if not os.path.exists(f"feature_data_{cp}_new.csv"):
     print("Part 2 started")
     df = pd.read_csv(f"feature_data_{cp}.csv").rename({"query_id": "query_id_new"}, axis=1)
     df = df[[col for col in df.columns if not col.startswith("doc")] + ['docno']]
-    df.query_id_new = df.query_id_new.astype(int)
+
+
+
+    # df.query_id_new = df.query_id_new.astype(int)
     # df = pd.read_csv(f"feature_data_{cp}.csv").drop("rank", axis=1)
 
     # TODO: assuming we run asrcqrels only!
@@ -76,17 +81,37 @@ if not os.path.exists(f"feature_data_{cp}_new.csv"):
 
 
     else:
-        df[["round_no", "query_id", "username", "creator"]] = df["docno"].apply(lambda x: pd.Series(x.split("-")))
+        # df[["round_no", "query_id", "username", "creator"]] = df["docno"].apply(lambda x: pd.Series(x.split("-")))
+        df[["round_no", "query_id", "username"]] = df["docno"].apply(lambda x: pd.Series(x.split("-")[1:])) #TOMMY DATA
+        df["creator"] = "creator"
 
     maximal_epoch, minimal_epoch = df.round_no.max(), df.round_no.min()
     df.round_no, df.query_id = df.round_no.astype(int), df.query_id.astype(int)
 
-    greg_data = pd.read_csv("greg_data.csv")[['round_no', 'query_id', 'username', 'position']].rename(
-        {"position": "original_position"}, axis=1)
+    if config.using_e5:
+        greg_data = pd.read_csv("tommy_data.csv")[['round_no', 'query_id', 'username', 'position']].rename(
+            {"position": "original_position"}, axis=1)
+    else:
+        greg_data = pd.read_csv("greg_data.csv")[['round_no', 'query_id', 'username', 'position']].rename(
+            {"position": "original_position"}, axis=1)
+
     greg_data.round_no, greg_data.query_id, greg_data.username = greg_data.round_no.astype(
         int), greg_data.query_id.astype(
         int), greg_data.username.astype(str)
-    df = df.merge(greg_data, on=['round_no', 'query_id', 'username'], how='left')
+
+    # TOMMY
+    # df.round_no, df.query_id, df.username = df.round_no.astype(
+    #     int), df.query_id.astype(
+    #     int), df.username.astype(str)
+    df = df.merge(greg_data, on=['round_no', 'query_id', 'username'],  how='left', suffixes=['','_x']) # TOMMY
+
+    df = df.merge(greg_data, right_on=['round_no', 'query_id', 'username'], left_on=['round_no', 'query_id', 'creator'], how='left', suffixes=['','_y'])
+
+    for col in ["username", "original_position"]:
+        for suffix in ["_x", "_y"]:
+            if f"{col}{suffix}" in df.columns:
+                df[col] = df[col].fillna(df[f"{col}{suffix}"])
+                df = df.drop([f"{col}{suffix}"], axis=1)
 
     prev_round = []
     for _, row in greg_data[greg_data.round_no == int(minimal_epoch) - 1].iterrows():
@@ -110,6 +135,7 @@ if not os.path.exists(f"feature_data_{cp}_new.csv"):
                 prev_docno = df.index[
                     (df.round_no == row.round_no - 1) & (df.query_id == row.query_id) & (df.creator == "creator") & (
                             df.username == row.creator)].tolist()[0]
+                # TOMMY
                 orig_docno = df.index[
                     (df.round_no == row.round_no) & (df.query_id == row.query_id) & (df.creator == "creator") & (
                             df.username == row.creator)].tolist()[0]
@@ -125,6 +151,17 @@ if not os.path.exists(f"feature_data_{cp}_new.csv"):
             df.loc[idx, "previous_pos"] = df[df.index == prev_docno].original_position.values[0]
         except:
             continue
+
+
+    if "username_x" in df.columns:
+        df["username"] = df["username"].fillna(df["username_x"])
+        df = df.drop(["username_x"], axis=1)
+    if "username_y" in df.columns:
+        df["username"] = df["username"].fillna(df["username_y"])
+        df = df.drop(["username_y"], axis=1)
+
+    df.to_csv(f"feature_data_{cp}_new.csv", index=False)
+
 
     # # iterating over groups to get their ranks (done if queries are the normal 31 only)
     # # Grouping the DataFrame by 'round_no' and 'query_id' for further processing
@@ -159,20 +196,55 @@ if not os.path.exists(f"feature_data_{cp}_new.csv"):
 
     # df.loc[df.creator == 'creator', 'current_pos'] = df.loc[df.creator == 'creator', "original_position"]
 
-    df['pos_diff'] = df.apply(lambda row: max(int(row['current_pos'] - row['previous_pos']) * -1, 0) if pd.notna(
-        row['current_pos']) and pd.notna(row['previous_pos']) else np.nan, axis=1)
-    df['scaled_pos_diff'] = df.apply(
-        lambda row: row['pos_diff'] / (row['previous_pos'] - 1) if pd.notna(row['previous_pos']) and row[
-            'previous_pos'] != 1 else np.nan, axis=1)
+    # ORIGINAL MISTAKE
+
+    # df['pos_diff'] = df.apply(lambda row: max(int(row['current_pos'] - row['previous_pos']) * -1, 0) if pd.notna(
+    #     row['current_pos']) and pd.notna(row['previous_pos']) else np.nan, axis=1)
+    # df['scaled_pos_diff'] = df.apply(
+    #     lambda row: row['pos_diff'] / (row['previous_pos'] - 1) if pd.notna(row['previous_pos']) and row[
+    #         'previous_pos'] != 1 else np.nan, axis=1)
+
+    df['pos_diff'] = df['previous_pos'] - df['current_pos']
+
+
+    def scaled_difference(row):
+        if row['pos_diff'] > 0:  # Promotion
+            return row['pos_diff'] / (row['previous_pos'] - 1)
+        elif row['pos_diff'] < 0:  # Demotion
+            try:
+                return row['pos_diff'] / (5 - row['previous_pos'])
+            except:
+                return 0
+        else:
+            return 0  # No change
+
+
+    df['scaled_pos_diff'] = df.apply(scaled_difference, axis=1)
 
     # Calculating 'scaled_orig_pos_diff' based on 'orig_pos_diff', considering some conditions
-    df['orig_pos_diff'] = df.apply(
-        lambda row: max(int(row['current_pos'] - row['original_position']) * -1, 0) if pd.notna(
-            row['current_pos']) and pd.notna(row['original_position']) else np.nan, axis=1)
+    # df['orig_pos_diff'] = df.apply(
+    #     lambda row: max(int(row['current_pos'] - row['original_position']) * -1, 0) if pd.notna(
+    #         row['current_pos']) and pd.notna(row['original_position']) else np.nan, axis=1)
+    #
+    # df['scaled_orig_pos_diff'] = df.apply(
+    #     lambda row: row['orig_pos_diff'] / (row['original_position'] - 1) if pd.notna(row['original_position']) and row[
+    #         'original_position'] != 1 else np.nan, axis=1)
 
-    df['scaled_orig_pos_diff'] = df.apply(
-        lambda row: row['orig_pos_diff'] / (row['original_position'] - 1) if pd.notna(row['original_position']) and row[
-            'original_position'] != 1 else np.nan, axis=1)
+    df['orig_pos_diff'] = df['original_position'] - df['current_pos']
+
+
+    def scaled_orig_difference(row):
+        if row['orig_pos_diff'] > 0:  # Promotion
+            return row['orig_pos_diff'] / (row['original_position'] - 1)
+        elif row['orig_pos_diff'] < 0:  # Demotion
+            try:
+                return row['orig_pos_diff'] / (5 - row['original_position'])
+            except:
+                return 0
+        else:
+            return 0  # No change
+
+    df['scaled_orig_pos_diff'] = df.apply(scaled_orig_difference, axis=1)
 
     df = df[df.round_no != 1]
     df = df[df.score.notna()]
@@ -184,6 +256,8 @@ if not os.path.exists(f"feature_data_{cp}_new.csv"):
     print("Part 2 ended")
     exit()
 
+else:
+    df = pd.read_csv(f"feature_data_{cp}_new.csv")
 
 #### calculate smilarity ####
 def get_bert_embeddings(text):
@@ -215,58 +289,59 @@ def get_tfidf_embeddings(vectorizer, texts):
 #
 #     return output.last_hidden_state.mean(dim=1).numpy()
 
-def get_llama2_embeddings(text):
-    encoded_input = llama_tokenizer(text, return_tensors='pt', padding=True, truncation=True, max_length=512)
-    with torch.no_grad():
-        output = llama_model(**encoded_input)
-    return output.last_hidden_state.mean(dim=1).numpy()
+# def get_llama2_embeddings(text):
+#     encoded_input = llama_tokenizer(text, return_tensors='pt', padding=True, truncation=True, max_length=512)
+#     with torch.no_grad():
+#         output = llama_model(**encoded_input)
+#     return output.last_hidden_state.mean(dim=1).numpy()
 
 
 def calculate_cosine_similarity(embeddings1, embeddings2):
     return cosine_similarity(embeddings1, embeddings2)[0][0]
 
 
-def process_row(row, vectorizer):
-    prev_df = greg_data[(greg_data.query_id == row.query_id) & (greg_data.round_no == "6")]
-    if row.creator == "creator":  # student
-        prev_txt = prev_df[prev_df.username == row.username].text.values[0]
-    else:  # bot
-        prev_txt = prev_df[prev_df.username == row.creator].text.values[0]
+# def process_row(row, vectorizer):
+#     prev_df = greg_data[(greg_data.query_id == row.query_id) & (greg_data.round_no == "6")]
+#     if row.creator == "creator":  # student
+#         prev_txt = prev_df[prev_df.username == row.username].text.values[0]
+#     else:  # bot
+#         prev_txt = prev_df[prev_df.username == row.creator].text.values[0]
+#
+#     try:
+#         llama_similarity_prev = calculate_cosine_similarity(get_llama2_embeddings(row['text']),
+#                                                             get_llama2_embeddings(prev_txt))
+#     except Exception as e:
+#         print("ERROR!\n", e)
+#         x = 1
+#     # print("Previous LLAMA similarity: ", llama_similarity_prev)
+#
+#     # bert_similarity = calculate_cosine_similarity(top_bert,get_bert_embeddings(row['text']))
+#     # print("Top BERT similarity: ", bert_similarity)
+#     bert_similarity_prev = calculate_cosine_similarity(get_bert_embeddings(row['text']), get_bert_embeddings(prev_txt))
+#     # print("Previous BERT similarity: ", bert_similarity_prev)
+#
+#     # tfidf_similarity = calculate_cosine_similarity(top_tfidf,get_tfidf_embeddings(vectorizer, [row['text']]))
+#     # print("Top TF-IDF similarity: ", tfidf_similarity)
+#     tfidf_similarity_prev = calculate_cosine_similarity(get_tfidf_embeddings(vectorizer, [row['text']]),
+#                                                         get_tfidf_embeddings(vectorizer, [prev_txt]))
+#     # print("Previous TF-IDF similarity: ", tfidf_similarity_prev)
+#
+#     return row.name, bert_similarity_prev, tfidf_similarity_prev, llama_similarity_prev
 
-    try:
-        llama_similarity_prev = calculate_cosine_similarity(get_llama2_embeddings(row['text']),
-                                                            get_llama2_embeddings(prev_txt))
-    except Exception as e:
-        print("ERROR!\n", e)
-        x = 1
-    # print("Previous LLAMA similarity: ", llama_similarity_prev)
-
-    # bert_similarity = calculate_cosine_similarity(top_bert,get_bert_embeddings(row['text']))
-    # print("Top BERT similarity: ", bert_similarity)
-    bert_similarity_prev = calculate_cosine_similarity(get_bert_embeddings(row['text']), get_bert_embeddings(prev_txt))
-    # print("Previous BERT similarity: ", bert_similarity_prev)
-
-    # tfidf_similarity = calculate_cosine_similarity(top_tfidf,get_tfidf_embeddings(vectorizer, [row['text']]))
-    # print("Top TF-IDF similarity: ", tfidf_similarity)
-    tfidf_similarity_prev = calculate_cosine_similarity(get_tfidf_embeddings(vectorizer, [row['text']]),
-                                                        get_tfidf_embeddings(vectorizer, [prev_txt]))
-    # print("Previous TF-IDF similarity: ", tfidf_similarity_prev)
-
-    return row.name, bert_similarity_prev, tfidf_similarity_prev, llama_similarity_prev
 
 
 if not os.path.exists(f"feature_data_{cp}_new_sim.csv"):
     print("Part 3 started")
-    llama_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf",
-                                                    use_auth_token='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',
-                                                    use_fast=True)
-
-    llama_tokenizer.pad_token = llama_tokenizer.eos_token
-
-    llama_model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-chat-hf",
-                                                       use_auth_token='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')
-
-    llama_model.to('cpu')
+    # llama_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf",
+    #                                                 use_auth_token='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',
+    #                                                 use_fast=True)
+    #
+    # llama_tokenizer.pad_token = llama_tokenizer.eos_token
+    #
+    # llama_model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-chat-hf",
+    #                                                    use_auth_token='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')
+    #
+    # llama_model.to('cpu')
     # TODO: assuming we only work on one epoch!
 
     orig = pd.read_csv(f"feature_data_{cp}_new.csv")
@@ -325,15 +400,15 @@ if not os.path.exists(f"feature_data_{cp}_new_sim.csv"):
     # Collect all futures
     futures = []
 
-    for qid in tqdm(list(texts_df.query_id.unique()), desc="Processing queries", miniters=100,
-                    total=len(list(texts_df.query_id.unique()))):
-        # top_txt = prev_top_data[prev_top_data.query_id == int(qid)].text.values[0]
-        # top_bert = get_bert_embeddings(top_txt)
-        # top_tfidf = get_tfidf_embeddings(vectorizer, [top_txt])
-
-        subset_df = texts_df[texts_df.query_id == qid]
-        for index, row in subset_df.iterrows():
-            futures.append(executor.submit(process_row, row, vectorizer))
+    # for qid in tqdm(list(texts_df.query_id.unique()), desc="Processing queries", miniters=100,
+    #                 total=len(list(texts_df.query_id.unique()))):
+    #     # top_txt = prev_top_data[prev_top_data.query_id == int(qid)].text.values[0]
+    #     # top_bert = get_bert_embeddings(top_txt)
+    #     # top_tfidf = get_tfidf_embeddings(vectorizer, [top_txt])
+    #
+    #     subset_df = texts_df[texts_df.query_id == qid]
+    #     for index, row in subset_df.iterrows():
+    #         futures.append(executor.submit(process_row, row, vectorizer))
 
     # Retrieve results and update DataFrame
     for future in tqdm(futures, desc="Updating DataFrame", miniters=100, total=len(futures)):

@@ -7,7 +7,7 @@ from itertools import product
 from tqdm import tqdm
 
 import config
-from config import current_prompt as cp, ACTIVE_BOTS, get_prompt, temperatures, get_current_doc
+from config import current_prompt as cp, ACTIVE_BOTS, get_prompt, temperatures, get_current_doc, bot_cover_df, using_gpt
 
 
 def prepare_directory(dir_path):
@@ -24,14 +24,16 @@ def divide_df(df, n):
         dfs[i].to_csv(f'bot_followup_{cp}/part_{i + 1}.csv', index=False)
     print("division of df to", n, "parts completed")
 
+if config.using_e5:
+    greg_data = pd.read_csv("tommy_data.csv")
+    greg_data = greg_data[
+        (greg_data.round_no == config.train_round) & (greg_data.position.between(2, 4))]  # TODO: test setting from the article
 
-greg_data = pd.read_csv("greg_data.csv")
-greg_data = greg_data[
-    (greg_data.round_no == 7) & (greg_data.position.between(2, 5))]  # TODO: test setting from the article
-bots = ACTIVE_BOTS  # bots using prompt bank
-
-# # TODO: only include in testing!
-# bots = [bot for bot in bots if bot in ["DYN_1100T2", "DYN_1201R2","PAW_1301R","PAW_1210T","POW_1300","LIW_1201"]]
+else:
+    greg_data = pd.read_csv("greg_data.csv")
+    greg_data = greg_data[
+        (greg_data.round_no == 7) & (greg_data.position.between(2, 5))]  # TODO: test setting from the article
+bots = ACTIVE_BOTS  if using_gpt else list(config.bot_cover_df.bot_name.unique())# bots using prompt bank
 
 queries = greg_data["query_id"].unique()
 
@@ -82,38 +84,40 @@ final_df = pd.DataFrame(rows).sort_values(["round_no", "query_id"], ascending=[F
 #         columns={'text_y': 'text'})
 #     final_df.loc[final_df.username != 'BOT', 'text'] = merged_df['text']
 
-# TODO: testing, delete to use all queries
 # Add prompts to csv
 final_df = final_df[final_df.query_id.isin(queries)].reset_index(drop=True)
-greg_data = pd.read_csv("greg_data.csv")
-
+if config.using_e5:
+    greg_data = pd.read_csv("tommy_data.csv")
+else:
+    greg_data = pd.read_csv("greg_data.csv")
 
 for idx, row in tqdm(final_df.iterrows(), total=final_df.shape[0]):
-    if not config.using_gpt:
+    if config.using_gpt:
 
         messages = get_prompt(row.username, greg_data, row.creator, row.query_id)
-        content_list = [re.sub(r' {2,}', ' ', re.sub(r'\n{3,}', '\n\n', m["content"].replace("\\n", "\n"))) for m in
-                        messages]
-        # messages_str = f"<s>[INST] <<SYS>>\n{content_list[0]}\n<</SYS>> [/INST]</s>"
-        messages_str = f"<s>[INST] <<SYS>>\n{content_list[0]}\n<</SYS>> \n\nContext: [/INST]</s>"
+        # content_list = [re.sub(r' {2,}', ' ', re.sub(r'\n{3,}', '\n\n', m["content"].replace("\\n", "\n"))) for m in
+        #                 messages]
+        # # messages_str = f"<s>[INST] <<SYS>>\n{content_list[0]}\n<</SYS>> [/INST]</s>"
+        # messages_str = f"<s>[INST] <<SYS>>\n{content_list[0]}\n<</SYS>> \n\nContext: [/INST]</s>"
+        #
+        # for block in content_list[1:]:
+        #     messages_str += f"<s>[INST]\n{block}\n[/INST]</s>"
+        # messages_str = re.sub(r' {2,}', ' ', re.sub(r'\n{3,}', '\n\n', messages_str.replace("\\n", "\n")))
+        # messages_str = messages_str.rstrip().rstrip('</s>')
+        # # pprint(messages_str)
+        # # print("\n\n-------------------------------------------\n\n")
+        # # messages_str = messages_str[:messages_str.find("Context") + len("Context")] + \
+        # #                messages_str[messages_str.find("Context") + len("Context"):].replace("\n[/INST]</s><s>[INST]\n", "", 1) \
+        # #     if "Context" in messages_str and messages_str[messages_str.find("Context"):].count(
+        # #     "[/INST]</s><s>[INST]") > 0 else messages_str
+        #
+        # messages_str = messages_str.replace("[/INST]</s><s>[INST]","")
+        #
+        # messages_str = messages_str.rsplit("[/INST]", 1)[
+        #                       0] + "\n\n---\nEdited Document:\n[/INST]" if "[/INST]" in messages_str else messages_str
+        # messages_str = re.sub(r'\n{3,}', '\n\n', messages_str)
 
-        for block in content_list[1:]:
-            messages_str += f"<s>[INST]\n{block}\n[/INST]</s>"
-        messages_str = re.sub(r' {2,}', ' ', re.sub(r'\n{3,}', '\n\n', messages_str.replace("\\n", "\n")))
-        messages_str = messages_str.rstrip().rstrip('</s>')
-        # pprint(messages_str)
-        # print("\n\n-------------------------------------------\n\n")
-        # messages_str = messages_str[:messages_str.find("Context") + len("Context")] + \
-        #                messages_str[messages_str.find("Context") + len("Context"):].replace("\n[/INST]</s><s>[INST]\n", "", 1) \
-        #     if "Context" in messages_str and messages_str[messages_str.find("Context"):].count(
-        #     "[/INST]</s><s>[INST]") > 0 else messages_str
-
-        messages_str = messages_str.replace("[/INST]</s><s>[INST]","")
-
-        messages_str = messages_str.rsplit("[/INST]", 1)[
-                              0] + "\n\n---\nEdited Document:\n[/INST]" if "[/INST]" in messages_str else messages_str
-        messages_str = re.sub(r'\n{3,}', '\n\n', messages_str)
-
+        messages_str = str(messages)
         final_df.at[idx, "prompt"] = messages_str
 
     ref_doc = get_current_doc(greg_data, row.creator, row.query_id)
